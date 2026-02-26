@@ -136,6 +136,29 @@ tr:hover td{background:#f8fbff}
 
 hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 
+/* ── Amazon API Fetch ── */
+.api-card{border:1px solid #bfdbfe;border-radius:8px;overflow:hidden;margin-bottom:16px}
+.api-card-hd{background:#eff6ff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.api-card-hd:hover{background:#dbeafe}
+.api-card-hd-left{display:flex;align-items:center;gap:10px;font-weight:600;color:#1e40af}
+.api-card-bd{padding:16px;display:none}
+.api-card-bd.open{display:block}
+.api-section-title{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px}
+.api-section-title:first-child{margin-top:0}
+.date-preview{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 14px;font-size:12px;color:#166534;margin-bottom:14px}
+.date-preview-row{display:flex;justify-content:space-between;padding:2px 0}
+.date-preview-row span:first-child{font-weight:600}
+.progress-wrap{margin-top:10px;display:none}
+.progress-wrap.show{display:block}
+.progress-bar{height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;width:0;background:linear-gradient(90deg,#2563a8,#60a5fa);border-radius:3px;transition:width .4s}
+.fetch-log{margin-top:8px;max-height:120px;overflow-y:auto;font-size:12px;color:#6b7280;font-family:monospace}
+.fetch-log-line{padding:1px 0}
+.fetch-log-line.ok{color:#16a34a}.fetch-log-line.err{color:#dc2626}.fetch-log-line.info{color:#2563a8}
+.tag-required{font-size:10px;color:#dc2626;margin-left:4px;font-weight:400}
+.proxy-help{background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:10px 12px;font-size:12px;color:#92400e;margin-top:8px;line-height:1.6}
+.proxy-help code{background:#fff;padding:1px 4px;border-radius:3px;font-size:11px}
+
 /* ── Auth Screen ── */
 #authScreen{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f2744 0%,#1a4a8a 50%,#0f2744 100%)}
 #authScreen.hidden{display:none}
@@ -265,6 +288,95 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
     <input type="file" id="dataFileIn" accept=".xlsx,.xls,.csv" multiple style="display:none" onchange="onDataFiles(event)">
     <div style="margin-top:10px">
       <button class="btn btn-secondary btn-sm" onclick="openPasteData()">📋 粘贴数据</button>
+    </div>
+  </div>
+
+  <!-- ── Amazon API Fetch Card ── -->
+  <div class="api-card">
+    <div class="api-card-hd" onclick="toggleApiCard()">
+      <div class="api-card-hd-left">
+        <span>🔗</span>
+        <span>API 获取亚马逊销量数据</span>
+        <span class="badge badge-blue" id="apiStatusBadge">未配置</span>
+      </div>
+      <span id="apiCardArrow" style="color:#2563a8;font-size:13px">▶ 展开配置</span>
+    </div>
+    <div class="api-card-bd" id="apiCardBd">
+
+      <!-- 日期预览 -->
+      <div class="api-section-title">📅 数据时间范围（含2天滞后偏移）</div>
+      <div class="date-preview" id="datePreview">计算中…</div>
+
+      <!-- 凭证配置 -->
+      <div class="api-section-title">🔑 SP-API 授权凭证</div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Client ID <span class="tag-required">必填</span></label>
+          <input class="form-control form-control-sm" id="amzClientId" type="text" placeholder="amzn1.application-oa2-client.xxx" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Client Secret <span class="tag-required">必填</span></label>
+          <input class="form-control form-control-sm" id="amzClientSecret" type="password" placeholder="••••••••" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Refresh Token <span class="tag-required">必填</span></label>
+          <input class="form-control form-control-sm" id="amzRefreshToken" type="password" placeholder="Atzr|xxx" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Marketplace</label>
+          <select class="form-control form-control-sm" id="amzMarketplace">
+            <option value="ATVPDKIKX0DER">美国 (US)</option>
+            <option value="A2EUQ1WTGCTBG2">加拿大 (CA)</option>
+            <option value="A1AM78C64UM0Y8">墨西哥 (MX)</option>
+            <option value="A1F83G8C2ARO7P">英国 (UK)</option>
+            <option value="A1PA6795UKMFR9">德国 (DE)</option>
+            <option value="A13V1IB3VIYZZH">法国 (FR)</option>
+            <option value="APJ6JRA9NG5V4">意大利 (IT)</option>
+            <option value="A1RKKUPIHCS9HS">西班牙 (ES)</option>
+            <option value="A1VC38T7YXB528">日本 (JP)</option>
+            <option value="A39IBJ37TRP1C6">澳大利亚 (AU)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">
+          数据延迟天数
+          <span style="font-weight:400;color:#9ca3af;font-size:11px">（亚马逊数据滞后天数，默认2天）</span>
+        </label>
+        <div class="input-group" style="max-width:160px">
+          <input type="number" class="form-control form-control-sm" id="amzLatency" value="2" min="0" max="7" oninput="renderDatePreview()">
+          <span class="input-addon">天</span>
+        </div>
+      </div>
+
+      <!-- 代理配置 -->
+      <div class="api-section-title">🌐 中转代理 URL <span class="tag-required">必填</span></div>
+      <div class="form-group">
+        <input class="form-control form-control-sm" id="amzProxy" type="url" placeholder="https://your-worker.your-name.workers.dev">
+      </div>
+      <div class="proxy-help">
+        ⚠️ 由于浏览器安全限制（CORS），无法直接调用亚马逊 API，需要通过一个中转代理。<br>
+        推荐使用 <strong>Cloudflare Worker</strong>（免费）：<br>
+        1. 注册 <code>cloudflare.com</code> → Workers & Pages → 创建 Worker<br>
+        2. 将工具附带的 <code>worker.js</code> 模板粘贴进去并部署<br>
+        3. 将 Worker 的 URL 填入上方输入框
+      </div>
+
+      <hr>
+      <div class="btn-group" style="align-items:center">
+        <button class="btn btn-primary" id="fetchBtn" onclick="fetchAmazonSales()">🚀 获取亚马逊销量</button>
+        <button class="btn btn-ghost btn-sm" onclick="saveAmzCfg()">💾 保存配置</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearAmzCfg()">🗑️ 清除凭证</button>
+        <span id="fetchHint" style="font-size:12px;color:#9ca3af">
+          将获取：基础数据中所有 ASIN 的 7 / 14 / 30 天销量
+        </span>
+      </div>
+
+      <!-- 进度 -->
+      <div class="progress-wrap" id="fetchProgress">
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="fetch-log" id="fetchLog"></div>
+      </div>
     </div>
   </div>
 
@@ -1263,6 +1375,218 @@ function importCfg(ev){
     }catch(e){toast('解析失败：'+e.message,'err');}
   };
   rd.readAsText(f);ev.target.value='';
+}
+
+// ======================================================================
+// AMAZON SP-API FETCH
+// ======================================================================
+const AMZ_CFG_KEY = 'amz_api_cfg';
+
+// ── 配置存取 ──────────────────────────────────────────────
+function loadAmzCfg(){
+  try{
+    const c=JSON.parse(localStorage.getItem(AMZ_CFG_KEY)||'{}');
+    if(c.clientId)    document.getElementById('amzClientId').value    = c.clientId;
+    if(c.clientSecret)document.getElementById('amzClientSecret').value = c.clientSecret;
+    if(c.refreshToken)document.getElementById('amzRefreshToken').value = c.refreshToken;
+    if(c.marketplace) document.getElementById('amzMarketplace').value  = c.marketplace;
+    if(c.proxy)       document.getElementById('amzProxy').value        = c.proxy;
+    if(c.latency!==undefined) document.getElementById('amzLatency').value = c.latency;
+    updApiStatusBadge();
+  }catch(e){}
+  renderDatePreview();
+}
+
+function saveAmzCfg(){
+  const c={
+    clientId:     document.getElementById('amzClientId').value.trim(),
+    clientSecret: document.getElementById('amzClientSecret').value.trim(),
+    refreshToken: document.getElementById('amzRefreshToken').value.trim(),
+    marketplace:  document.getElementById('amzMarketplace').value,
+    proxy:        document.getElementById('amzProxy').value.trim(),
+    latency:      parseInt(document.getElementById('amzLatency').value)||2,
+  };
+  localStorage.setItem(AMZ_CFG_KEY, JSON.stringify(c));
+  updApiStatusBadge();
+  toast('API 配置已保存');
+}
+
+function clearAmzCfg(){
+  if(!confirm('确定清除已保存的 API 凭证？'))return;
+  localStorage.removeItem(AMZ_CFG_KEY);
+  ['amzClientId','amzClientSecret','amzRefreshToken','amzProxy'].forEach(id=>document.getElementById(id).value='');
+  updApiStatusBadge();
+  toast('凭证已清除','warn');
+}
+
+function updApiStatusBadge(){
+  const c=JSON.parse(localStorage.getItem(AMZ_CFG_KEY)||'{}');
+  const el=document.getElementById('apiStatusBadge');
+  if(!el)return;
+  const ok=c.clientId&&c.clientSecret&&c.refreshToken&&c.proxy;
+  el.className='badge '+(ok?'badge-green':'badge-yellow');
+  el.textContent=ok?'已配置':'未配置';
+}
+
+function toggleApiCard(){
+  const bd=document.getElementById('apiCardBd');
+  const arrow=document.getElementById('apiCardArrow');
+  const open=bd.classList.toggle('open');
+  arrow.textContent=open?'▼ 收起':'▶ 展开配置';
+  if(open){ loadAmzCfg(); renderDatePreview(); }
+}
+
+// ── 日期范围计算 ───────────────────────────────────────────
+function calcDateRanges(){
+  const latency=parseInt(document.getElementById('amzLatency')?.value||2);
+  const end=new Date();
+  end.setDate(end.getDate()-latency);           // 往前推 N 天（数据截止日）
+  const fmt=d=>d.toISOString().split('T')[0];
+  const startOf=(days)=>{ const d=new Date(end); d.setDate(d.getDate()-(days-1)); return d; };
+  return {
+    endDate:  fmt(end),
+    start7:   fmt(startOf(7)),
+    start14:  fmt(startOf(14)),
+    start30:  fmt(startOf(30)),
+  };
+}
+
+function renderDatePreview(){
+  const el=document.getElementById('datePreview');
+  if(!el)return;
+  const r=calcDateRanges();
+  el.innerHTML=`
+    <div class="date-preview-row"><span>数据截止日：</span><span>${r.endDate}</span></div>
+    <div class="date-preview-row"><span>7 天范围：</span><span>${r.start7} → ${r.endDate}</span></div>
+    <div class="date-preview-row"><span>14 天范围：</span><span>${r.start14} → ${r.endDate}</span></div>
+    <div class="date-preview-row"><span>30 天范围：</span><span>${r.start30} → ${r.endDate}</span></div>`;
+}
+
+// ── 日志 & 进度 ────────────────────────────────────────────
+function fetchLog(msg, type=''){
+  const el=document.getElementById('fetchLog');
+  if(!el)return;
+  const d=document.createElement('div');
+  d.className='fetch-log-line '+type;
+  d.textContent='['+new Date().toLocaleTimeString()+'] '+msg;
+  el.appendChild(d);
+  el.scrollTop=el.scrollHeight;
+}
+
+function setProgress(pct){
+  const el=document.getElementById('progressFill');
+  if(el)el.style.width=pct+'%';
+}
+
+// ── 核心：获取 Amazon 销量 ─────────────────────────────────
+async function fetchAmazonSales(){
+  // 验证
+  const clientId     = document.getElementById('amzClientId').value.trim();
+  const clientSecret = document.getElementById('amzClientSecret').value.trim();
+  const refreshToken = document.getElementById('amzRefreshToken').value.trim();
+  const marketplace  = document.getElementById('amzMarketplace').value;
+  const proxyUrl     = document.getElementById('amzProxy').value.trim();
+
+  if(!clientId||!clientSecret||!refreshToken){
+    toast('请填写 Client ID、Client Secret 和 Refresh Token','err'); return;
+  }
+  if(!proxyUrl){
+    toast('请填写中转代理 URL','err'); return;
+  }
+  if(!S.master.length){
+    toast('请先在"基础数据"中导入 ASIN 列表','err'); return;
+  }
+
+  const asins = S.master.map(r=>r.asin).filter(Boolean);
+  if(!asins.length){ toast('基础数据中无有效 ASIN','err'); return; }
+
+  const btn=document.getElementById('fetchBtn');
+  btn.disabled=true; btn.textContent='获取中…';
+  document.getElementById('fetchProgress').classList.add('show');
+  document.getElementById('fetchLog').innerHTML='';
+  setProgress(5);
+
+  const ranges=calcDateRanges();
+  fetchLog(`共 ${asins.length} 个 ASIN，时间截止 ${ranges.endDate}`,'info');
+  fetchLog('正在请求代理服务器…');
+
+  try{
+    // 构造请求体，统一交给代理处理
+    const payload={
+      credentials:{ clientId, clientSecret, refreshToken, marketplaceId: marketplace },
+      asins,
+      ranges:[
+        {key:'sales7',  startDate:ranges.start7,  endDate:ranges.endDate},
+        {key:'sales14', startDate:ranges.start14, endDate:ranges.endDate},
+        {key:'sales30', startDate:ranges.start30, endDate:ranges.endDate},
+      ]
+    };
+
+    setProgress(20);
+    const resp = await fetch(proxyUrl, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+
+    setProgress(70);
+    if(!resp.ok){
+      const errText=await resp.text();
+      throw new Error(`代理返回错误 ${resp.status}：${errText.slice(0,200)}`);
+    }
+
+    const result = await resp.json();
+    setProgress(90);
+
+    if(!result.success){
+      throw new Error(result.message||'代理返回失败');
+    }
+
+    // 解析结果并导入数据源
+    const data=result.data; // {asin: {sales7, sales14, sales30}}
+    if(!data||!Object.keys(data).length){
+      throw new Error('代理返回数据为空，请检查 ASIN 是否正确');
+    }
+
+    // 统计
+    const hitCount=Object.values(data).filter(v=>v.sales7!==undefined).length;
+    fetchLog(`收到 ${Object.keys(data).length} 条数据，有销量记录 ${hitCount} 条`,'ok');
+
+    // 导入为数据源
+    const srcData={};
+    Object.entries(data).forEach(([asin,vals])=>{
+      srcData[asin]={
+        sales7:  vals.sales7  ??0,
+        sales14: vals.sales14 ??0,
+        sales30: vals.sales30 ??0,
+      };
+    });
+
+    const label=`Amazon API（${ranges.start7}→${ranges.endDate}）`;
+    // 替换同名旧数据源
+    const oldIdx=S.sources.findIndex(s=>s.name.startsWith('Amazon API'));
+    if(oldIdx>=0) S.sources.splice(oldIdx,1);
+
+    S.sources.push({
+      id:'amz_'+Date.now(),
+      name: label,
+      fields:['sales7','sales14','sales30'],
+      data: srcData,
+      rowCount: Object.keys(srcData).length
+    });
+
+    saveS();
+    setProgress(100);
+    fetchLog(`✅ 已导入数据源：${label}`,'ok');
+    renderSources();
+    toast(`获取成功：${hitCount} 个 ASIN 有销量数据`);
+
+  }catch(e){
+    fetchLog('❌ '+e.message,'err');
+    toast('获取失败：'+e.message,'err');
+  }finally{
+    btn.disabled=false; btn.textContent='🚀 获取亚马逊销量';
+  }
 }
 
 // ======================================================================
