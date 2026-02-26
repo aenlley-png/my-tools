@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>补货计算工具 v2.0</title>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Microsoft YaHei',Arial,sans-serif;background:#f0f4f8;color:#333;font-size:14px;min-height:100vh}
@@ -183,43 +181,17 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
       <h2>补货计算工具</h2>
       <p>Inventory Replenishment Calculator</p>
     </div>
-    <div class="auth-tabs">
-      <div class="auth-tab active" onclick="switchAuthTab('login')">登 录</div>
-      <div class="auth-tab" onclick="switchAuthTab('register')">注 册</div>
-    </div>
     <div class="auth-body">
-      <!-- Login -->
-      <div class="auth-form active" id="loginForm">
-        <div class="auth-err" id="loginErr"></div>
-        <div class="auth-field">
-          <label>邮箱账号</label>
-          <input class="auth-input" id="loginEmail" type="email" placeholder="your@email.com" autocomplete="email">
-        </div>
-        <div class="auth-field">
-          <label>密码</label>
-          <input class="auth-input" id="loginPwd" type="password" placeholder="请输入密码" autocomplete="current-password">
-        </div>
-        <button class="auth-btn" id="loginBtn" onclick="doLogin()">登 录</button>
-        <div class="auth-footer">没有账号？点击上方"注册"创建</div>
+      <div class="auth-err" id="loginErr"></div>
+      <div class="auth-field">
+        <label>账号</label>
+        <input class="auth-input" id="loginUser" type="text" placeholder="请输入账号" autocomplete="username">
       </div>
-      <!-- Register -->
-      <div class="auth-form" id="registerForm">
-        <div class="auth-err" id="regErr"></div>
-        <div class="auth-field">
-          <label>邮箱账号</label>
-          <input class="auth-input" id="regEmail" type="email" placeholder="your@email.com" autocomplete="email">
-        </div>
-        <div class="auth-field">
-          <label>密码 <span style="font-weight:400;color:#9ca3af">（至少6位）</span></label>
-          <input class="auth-input" id="regPwd" type="password" placeholder="设置密码（至少6位）" autocomplete="new-password">
-        </div>
-        <div class="auth-field">
-          <label>确认密码</label>
-          <input class="auth-input" id="regPwd2" type="password" placeholder="再次输入密码" autocomplete="new-password">
-        </div>
-        <button class="auth-btn" id="regBtn" onclick="doRegister()">注 册</button>
-        <div class="auth-footer">已有账号？点击上方"登录"</div>
+      <div class="auth-field">
+        <label>密码</label>
+        <input class="auth-input" id="loginPwd" type="password" placeholder="请输入密码" autocomplete="current-password">
       </div>
+      <button class="auth-btn" id="loginBtn" onclick="doLogin()">登 录</button>
     </div>
   </div>
 </div>
@@ -1294,109 +1266,57 @@ function importCfg(ev){
 }
 
 // ======================================================================
-// FIREBASE AUTH
+// 本地登录验证
 // ======================================================================
+const AUTH_USER = 'LingDong';
+const AUTH_PWD  = 'LingDong260226!@';
+const AUTH_KEY  = 'ld_auth';
 
-// ▼▼▼ 将下方替换为你的 Firebase 项目配置 ▼▼▼
-const firebaseCfg = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID"
-};
-// ▲▲▲ 配置结束 ▲▲▲
-
-firebase.initializeApp(firebaseCfg);
-const auth = firebase.auth();
-
-// 错误码中文映射
-const AUTH_ERR = {
-  'auth/invalid-email':         '邮箱格式不正确',
-  'auth/user-not-found':        '账号不存在',
-  'auth/wrong-password':        '密码错误',
-  'auth/email-already-in-use':  '该邮箱已被注册',
-  'auth/weak-password':         '密码太简单，至少6位',
-  'auth/too-many-requests':     '操作过于频繁，请稍后再试',
-  'auth/network-request-failed':'网络异常，请检查网络',
-  'auth/invalid-credential':    '邮箱或密码错误',
-};
-function authErrMsg(code){ return AUTH_ERR[code] || ('登录失败：' + code); }
-
-// 切换登录/注册标签
-function switchAuthTab(tab){
-  document.querySelectorAll('.auth-tab').forEach((t,i)=>t.classList.toggle('active', (tab==='login'&&i===0)||(tab==='register'&&i===1)));
-  document.getElementById('loginForm').classList.toggle('active', tab==='login');
-  document.getElementById('registerForm').classList.toggle('active', tab==='register');
-  document.getElementById('loginErr').classList.remove('show');
-  document.getElementById('regErr').classList.remove('show');
-}
-
-// 回车触发按钮
-['loginEmail','loginPwd'].forEach(id=>{
-  document.getElementById(id).addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
-});
-['regEmail','regPwd','regPwd2'].forEach(id=>{
-  document.getElementById(id).addEventListener('keydown', e=>{ if(e.key==='Enter') doRegister(); });
-});
-
-function showAuthErr(id, msg){
-  const el=document.getElementById(id);
+function showAuthErr(msg){
+  const el=document.getElementById('loginErr');
   el.textContent=msg; el.classList.add('show');
 }
 
-function setAuthLoading(btnId, loading){
-  const btn=document.getElementById(btnId);
-  btn.disabled=loading;
-  btn.textContent=loading ? '请稍候…' : (btnId==='loginBtn' ? '登 录' : '注 册');
-}
+['loginUser','loginPwd'].forEach(id=>{
+  document.getElementById(id).addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+});
 
 function doLogin(){
-  const email=document.getElementById('loginEmail').value.trim();
+  const user=document.getElementById('loginUser').value.trim();
   const pwd=document.getElementById('loginPwd').value;
   document.getElementById('loginErr').classList.remove('show');
-  if(!email||!pwd){ showAuthErr('loginErr','请填写邮箱和密码'); return; }
-  setAuthLoading('loginBtn', true);
-  auth.signInWithEmailAndPassword(email, pwd)
-    .catch(e=>{ showAuthErr('loginErr', authErrMsg(e.code)); setAuthLoading('loginBtn', false); });
-}
-
-function doRegister(){
-  const email=document.getElementById('regEmail').value.trim();
-  const pwd=document.getElementById('regPwd').value;
-  const pwd2=document.getElementById('regPwd2').value;
-  document.getElementById('regErr').classList.remove('show');
-  if(!email||!pwd||!pwd2){ showAuthErr('regErr','请填写所有字段'); return; }
-  if(pwd!==pwd2){ showAuthErr('regErr','两次密码不一致'); return; }
-  if(pwd.length<6){ showAuthErr('regErr','密码至少6位'); return; }
-  setAuthLoading('regBtn', true);
-  auth.createUserWithEmailAndPassword(email, pwd)
-    .catch(e=>{ showAuthErr('regErr', authErrMsg(e.code)); setAuthLoading('regBtn', false); });
+  if(!user||!pwd){ showAuthErr('请填写账号和密码'); return; }
+  if(user===AUTH_USER && pwd===AUTH_PWD){
+    sessionStorage.setItem(AUTH_KEY,'1');
+    enterApp();
+  } else {
+    showAuthErr('账号或密码错误');
+    document.getElementById('loginPwd').value='';
+    document.getElementById('loginPwd').focus();
+  }
 }
 
 function doLogout(){
   if(!confirm('确定退出登录？')) return;
-  auth.signOut();
+  sessionStorage.removeItem(AUTH_KEY);
+  document.getElementById('authScreen').classList.remove('hidden');
+  document.getElementById('appWrap').classList.remove('visible');
+  document.getElementById('loginUser').value='';
+  document.getElementById('loginPwd').value='';
+  document.getElementById('loginErr').classList.remove('show');
 }
 
-// 监听登录状态
-auth.onAuthStateChanged(user=>{
-  if(user){
-    // 已登录 → 显示应用
-    document.getElementById('authScreen').classList.add('hidden');
-    document.getElementById('appWrap').classList.add('visible');
-    document.getElementById('hdrUser').textContent = user.email;
-    // 初始化应用
-    loadS(); renderMaster(); updHdr(); renderFormulas();
-  } else {
-    // 未登录 → 显示登录界面
-    document.getElementById('authScreen').classList.remove('hidden');
-    document.getElementById('appWrap').classList.remove('visible');
-    setAuthLoading('loginBtn', false);
-    setAuthLoading('regBtn', false);
-  }
-});
+function enterApp(){
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('appWrap').classList.add('visible');
+  document.getElementById('hdrUser').textContent=AUTH_USER;
+  loadS(); renderMaster(); updHdr(); renderFormulas();
+}
+
+// 页面加载时检查是否已登录
+if(sessionStorage.getItem(AUTH_KEY)==='1'){
+  enterApp();
+}
 </script>
 </body>
 </html>
