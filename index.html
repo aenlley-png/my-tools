@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>补货计算工具 v2.0</title>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Microsoft YaHei',Arial,sans-serif;background:#f0f4f8;color:#333;font-size:14px;min-height:100vh}
@@ -135,9 +137,95 @@ tr:hover td{background:#f8fbff}
 .source-item:last-child{border-bottom:none}
 
 hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
+
+/* ── Auth Screen ── */
+#authScreen{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f2744 0%,#1a4a8a 50%,#0f2744 100%)}
+#authScreen.hidden{display:none}
+.auth-box{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:100%;max-width:400px;overflow:hidden}
+.auth-logo{background:linear-gradient(135deg,#1a3c5e,#2563a8);padding:28px 32px 22px;text-align:center;color:#fff}
+.auth-logo-icon{font-size:40px;margin-bottom:8px}
+.auth-logo h2{font-size:20px;font-weight:700;margin-bottom:4px}
+.auth-logo p{font-size:12px;opacity:.75}
+.auth-tabs{display:flex;border-bottom:2px solid #f0f4f8}
+.auth-tab{flex:1;padding:12px;text-align:center;cursor:pointer;font-size:14px;font-weight:500;color:#9ca3af;transition:.2s;border-bottom:3px solid transparent;margin-bottom:-2px}
+.auth-tab.active{color:#2563a8;border-bottom-color:#2563a8}
+.auth-body{padding:24px 28px 28px}
+.auth-form{display:none}.auth-form.active{display:block}
+.auth-field{margin-bottom:14px}
+.auth-field label{display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em}
+.auth-input{width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;transition:.2s;outline:none}
+.auth-input:focus{border-color:#2563a8;box-shadow:0 0 0 3px rgba(37,99,168,.12)}
+.auth-btn{width:100%;padding:11px;background:linear-gradient(135deg,#2563a8,#1d4ed8);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:.2s;margin-top:4px}
+.auth-btn:hover{opacity:.92;transform:translateY(-1px)}
+.auth-btn:disabled{opacity:.6;cursor:not-allowed;transform:none}
+.auth-err{background:#fee2e2;color:#991b1b;border-radius:6px;padding:8px 12px;font-size:13px;margin-bottom:12px;display:none}
+.auth-err.show{display:block}
+.auth-divider{text-align:center;color:#9ca3af;font-size:12px;margin:14px 0;position:relative}
+.auth-divider::before,.auth-divider::after{content:'';position:absolute;top:50%;width:38%;height:1px;background:#e5e7eb}
+.auth-divider::before{left:0}.auth-divider::after{right:0}
+.auth-footer{text-align:center;margin-top:16px;font-size:12px;color:#9ca3af}
+/* App hidden until auth */
+#appWrap{display:none}
+#appWrap.visible{display:block}
+/* Logout button */
+.btn-logout{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.35);color:#fff;padding:5px 12px;font-size:12px;border-radius:6px;cursor:pointer;transition:.2s}
+.btn-logout:hover{background:rgba(255,255,255,.25)}
+.user-info{font-size:12px;opacity:.8;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 </head>
 <body>
+
+<!-- ── Auth Screen ── -->
+<div id="authScreen">
+  <div class="auth-box">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">📦</div>
+      <h2>补货计算工具</h2>
+      <p>Inventory Replenishment Calculator</p>
+    </div>
+    <div class="auth-tabs">
+      <div class="auth-tab active" onclick="switchAuthTab('login')">登 录</div>
+      <div class="auth-tab" onclick="switchAuthTab('register')">注 册</div>
+    </div>
+    <div class="auth-body">
+      <!-- Login -->
+      <div class="auth-form active" id="loginForm">
+        <div class="auth-err" id="loginErr"></div>
+        <div class="auth-field">
+          <label>邮箱账号</label>
+          <input class="auth-input" id="loginEmail" type="email" placeholder="your@email.com" autocomplete="email">
+        </div>
+        <div class="auth-field">
+          <label>密码</label>
+          <input class="auth-input" id="loginPwd" type="password" placeholder="请输入密码" autocomplete="current-password">
+        </div>
+        <button class="auth-btn" id="loginBtn" onclick="doLogin()">登 录</button>
+        <div class="auth-footer">没有账号？点击上方"注册"创建</div>
+      </div>
+      <!-- Register -->
+      <div class="auth-form" id="registerForm">
+        <div class="auth-err" id="regErr"></div>
+        <div class="auth-field">
+          <label>邮箱账号</label>
+          <input class="auth-input" id="regEmail" type="email" placeholder="your@email.com" autocomplete="email">
+        </div>
+        <div class="auth-field">
+          <label>密码 <span style="font-weight:400;color:#9ca3af">（至少6位）</span></label>
+          <input class="auth-input" id="regPwd" type="password" placeholder="设置密码（至少6位）" autocomplete="new-password">
+        </div>
+        <div class="auth-field">
+          <label>确认密码</label>
+          <input class="auth-input" id="regPwd2" type="password" placeholder="再次输入密码" autocomplete="new-password">
+        </div>
+        <button class="auth-btn" id="regBtn" onclick="doRegister()">注 册</button>
+        <div class="auth-footer">已有账号？点击上方"登录"</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── App Wrap（登录后显示）── -->
+<div id="appWrap">
 
 <div class="toast-wrap" id="toastWrap"></div>
 
@@ -153,6 +241,8 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
     <button class="btn btn-ghost btn-sm" style="color:#fff;border-color:rgba(255,255,255,.4)" onclick="exportCfg()">💾 导出配置</button>
     <button class="btn btn-ghost btn-sm" style="color:#fff;border-color:rgba(255,255,255,.4)" onclick="document.getElementById('cfgFileIn').click()">📂 导入配置</button>
     <input type="file" id="cfgFileIn" accept=".json" style="display:none" onchange="importCfg(event)">
+    <div class="user-info" id="hdrUser"></div>
+    <button class="btn-logout" onclick="doLogout()">退出登录</button>
   </div>
 </div>
 
@@ -360,6 +450,8 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 </div>
 
 </div><!-- /content -->
+
+</div><!-- /appWrap -->
 
 <!-- ========== MODALS ========== -->
 
@@ -1201,11 +1293,110 @@ function importCfg(ev){
   rd.readAsText(f);ev.target.value='';
 }
 
-// ── Init ──────────────────────────────────────────────────
-loadS();
-renderMaster();
-updHdr();
-renderFormulas();
+// ======================================================================
+// FIREBASE AUTH
+// ======================================================================
+
+// ▼▼▼ 将下方替换为你的 Firebase 项目配置 ▼▼▼
+const firebaseCfg = {
+  apiKey:            "YOUR_API_KEY",
+  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId:         "YOUR_PROJECT_ID",
+  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId:             "YOUR_APP_ID"
+};
+// ▲▲▲ 配置结束 ▲▲▲
+
+firebase.initializeApp(firebaseCfg);
+const auth = firebase.auth();
+
+// 错误码中文映射
+const AUTH_ERR = {
+  'auth/invalid-email':         '邮箱格式不正确',
+  'auth/user-not-found':        '账号不存在',
+  'auth/wrong-password':        '密码错误',
+  'auth/email-already-in-use':  '该邮箱已被注册',
+  'auth/weak-password':         '密码太简单，至少6位',
+  'auth/too-many-requests':     '操作过于频繁，请稍后再试',
+  'auth/network-request-failed':'网络异常，请检查网络',
+  'auth/invalid-credential':    '邮箱或密码错误',
+};
+function authErrMsg(code){ return AUTH_ERR[code] || ('登录失败：' + code); }
+
+// 切换登录/注册标签
+function switchAuthTab(tab){
+  document.querySelectorAll('.auth-tab').forEach((t,i)=>t.classList.toggle('active', (tab==='login'&&i===0)||(tab==='register'&&i===1)));
+  document.getElementById('loginForm').classList.toggle('active', tab==='login');
+  document.getElementById('registerForm').classList.toggle('active', tab==='register');
+  document.getElementById('loginErr').classList.remove('show');
+  document.getElementById('regErr').classList.remove('show');
+}
+
+// 回车触发按钮
+['loginEmail','loginPwd'].forEach(id=>{
+  document.getElementById(id).addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+});
+['regEmail','regPwd','regPwd2'].forEach(id=>{
+  document.getElementById(id).addEventListener('keydown', e=>{ if(e.key==='Enter') doRegister(); });
+});
+
+function showAuthErr(id, msg){
+  const el=document.getElementById(id);
+  el.textContent=msg; el.classList.add('show');
+}
+
+function setAuthLoading(btnId, loading){
+  const btn=document.getElementById(btnId);
+  btn.disabled=loading;
+  btn.textContent=loading ? '请稍候…' : (btnId==='loginBtn' ? '登 录' : '注 册');
+}
+
+function doLogin(){
+  const email=document.getElementById('loginEmail').value.trim();
+  const pwd=document.getElementById('loginPwd').value;
+  document.getElementById('loginErr').classList.remove('show');
+  if(!email||!pwd){ showAuthErr('loginErr','请填写邮箱和密码'); return; }
+  setAuthLoading('loginBtn', true);
+  auth.signInWithEmailAndPassword(email, pwd)
+    .catch(e=>{ showAuthErr('loginErr', authErrMsg(e.code)); setAuthLoading('loginBtn', false); });
+}
+
+function doRegister(){
+  const email=document.getElementById('regEmail').value.trim();
+  const pwd=document.getElementById('regPwd').value;
+  const pwd2=document.getElementById('regPwd2').value;
+  document.getElementById('regErr').classList.remove('show');
+  if(!email||!pwd||!pwd2){ showAuthErr('regErr','请填写所有字段'); return; }
+  if(pwd!==pwd2){ showAuthErr('regErr','两次密码不一致'); return; }
+  if(pwd.length<6){ showAuthErr('regErr','密码至少6位'); return; }
+  setAuthLoading('regBtn', true);
+  auth.createUserWithEmailAndPassword(email, pwd)
+    .catch(e=>{ showAuthErr('regErr', authErrMsg(e.code)); setAuthLoading('regBtn', false); });
+}
+
+function doLogout(){
+  if(!confirm('确定退出登录？')) return;
+  auth.signOut();
+}
+
+// 监听登录状态
+auth.onAuthStateChanged(user=>{
+  if(user){
+    // 已登录 → 显示应用
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appWrap').classList.add('visible');
+    document.getElementById('hdrUser').textContent = user.email;
+    // 初始化应用
+    loadS(); renderMaster(); updHdr(); renderFormulas();
+  } else {
+    // 未登录 → 显示登录界面
+    document.getElementById('authScreen').classList.remove('hidden');
+    document.getElementById('appWrap').classList.remove('visible');
+    setAuthLoading('loginBtn', false);
+    setAuthLoading('regBtn', false);
+  }
+});
 </script>
 </body>
 </html>
