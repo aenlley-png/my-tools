@@ -204,10 +204,13 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 .collapse-toggle:hover{text-decoration:underline}
 .del-col{cursor:pointer;color:#dc2626;margin-left:6px;font-weight:400;font-size:12px}
 .del-col:hover{color:#991b1b}
-.stat[draggable="true"]{cursor:grab;transition:transform .15s,opacity .15s}
-.stat[draggable="true"]:active{cursor:grabbing}
-.stat.dragging{opacity:.4;transform:scale(.95)}
-.stat.drag-over{outline:2px dashed #2563a8;outline-offset:2px}
+.stat-row-flex{display:flex;gap:16px;margin-bottom:16px}
+.stat-row-flex .stat{flex:1;min-width:0}
+.stat[draggable="true"]{cursor:grab;user-select:none;transition:transform .15s,box-shadow .15s}
+.stat[draggable="true"]:hover{box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.stat.dragging{opacity:.35;transform:scale(.92)}
+.stat.drag-over-left{box-shadow:-3px 0 0 0 #2563a8,0 2px 10px rgba(37,99,168,.2)}
+.stat.drag-over-right{box-shadow:3px 0 0 0 #2563a8,0 2px 10px rgba(37,99,168,.2)}
 </style>
 </head>
 <body>
@@ -554,7 +557,7 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 
 <!-- ===== TAB 4: RESULTS ===== -->
 <div class="pane" id="p4">
-  <div class="grid-4" id="statRow" style="margin-bottom:16px"></div>
+  <div class="stat-row-flex" id="statRow"></div>
   <div class="card">
     <div class="card-title">🧮 计算结果</div>
     <div class="btn-group" style="margin-bottom:12px">
@@ -748,7 +751,11 @@ function buildParentToChildrenMap(){
 function lookupSku(asin){
   if(!asin)return '';
   const r=S.master.find(m=>m.asin===asin);
-  return r&&r.sku?r.sku:'';
+  if(r&&r.sku)return r.sku;
+  // Also check parentChild for stored parentSku
+  const pc=S.parentChild.find(p=>p.parent===asin);
+  if(pc&&pc.parentSku)return pc.parentSku;
+  return '';
 }
 
 // ── BroadcastChannel ────────────────────────────────────────
@@ -911,9 +918,12 @@ function renderPC(){
   const e=document.getElementById('pcEmpty');
   if(!S.parentChild.length){b.innerHTML='';e.style.display='block';return;}
   e.style.display='none';
-  b.innerHTML=S.parentChild.map((pc,i)=>`<tr>
-    <td><input class="form-control form-control-sm" style="min-width:130px" value="${esc(pc.parent||'')}" onchange="upPC(${i},this.value)" placeholder="父ASIN"></td>
-    <td style="font-size:12px;color:#6b7280;font-family:monospace">${esc(lookupSku(pc.parent))||'<span style="color:#ccc">-</span>'}</td>
+  b.innerHTML=S.parentChild.map((pc,i)=>{
+    const autoSku=lookupSku(pc.parent);
+    const skuVal=pc.parentSku||autoSku||'';
+    return `<tr>
+    <td><input class="form-control form-control-sm" style="min-width:130px" value="${esc(pc.parent||'')}" onchange="upPCParent(${i},this.value)" placeholder="父ASIN"></td>
+    <td><input class="form-control form-control-sm" style="min-width:100px" value="${esc(skuVal)}" onchange="upPCSku(${i},this.value)" placeholder="自动获取或手动输入"></td>
     <td>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
         ${(pc.children||[]).map((c,j)=>`<span class="child-badge">${esc(c)}<span class="del-child" onclick="delPCChild(${i},${j})">×</span></span>`).join('')}
@@ -921,10 +931,17 @@ function renderPC(){
       </div>
     </td>
     <td><button class="btn btn-danger btn-xs" onclick="delPC(${i})">删除</button></td>
-  </tr>`).join('');
+  </tr>`;}).join('');
 }
-function addPC(){S.parentChild.push({parent:'',children:[]});saveS();renderPC();broadcastPC();}
-function upPC(i,v){S.parentChild[i].parent=v;saveS();broadcastPC();}
+function addPC(){S.parentChild.push({parent:'',parentSku:'',children:[]});saveS();renderPC();broadcastPC();}
+function upPCParent(i,v){
+  S.parentChild[i].parent=v;
+  // Auto-fill SKU from master data
+  const autoSku=lookupSku(v);
+  if(autoSku) S.parentChild[i].parentSku=autoSku;
+  saveS();renderPC();broadcastPC();
+}
+function upPCSku(i,v){S.parentChild[i].parentSku=v;saveS();broadcastPC();}
 function delPC(i){S.parentChild.splice(i,1);saveS();renderPC();broadcastPC();}
 function delPCChild(pi,ci){S.parentChild[pi].children.splice(ci,1);saveS();renderPC();broadcastPC();}
 function addPCChild(ev,pi){
@@ -946,18 +963,26 @@ function openPCImport(){
         const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
         if(data.length<2){toast('数据不足','err');return;}
         const hdrs=data[0].map(h=>String(h||'').toLowerCase().trim());
-        let pi=hdrs.findIndex(h=>h.includes('父')||h.includes('parent'));
+        let pi=hdrs.findIndex(h=>h.includes('父asin')||h.includes('parent'));
+        let si=hdrs.findIndex(h=>h.includes('父sku')||h.includes('parentsku')||(h.includes('sku')&&h.includes('父')));
         let ci=hdrs.findIndex(h=>h.includes('子')||h.includes('child'));
-        if(pi<0)pi=0;if(ci<0)ci=1;
-        const map={};
+        if(pi<0)pi=0;if(ci<0)ci=Math.max(1,pi+1);
+        const map={};const skuMap={};
         data.slice(1).forEach(r=>{
           const p=String(r[pi]||'').trim(),c=String(r[ci]||'').trim();
-          if(!p||!c)return;if(!map[p])map[p]=[];if(!map[p].includes(c))map[p].push(c);
+          if(!p||!c)return;
+          if(!map[p])map[p]=[];if(!map[p].includes(c))map[p].push(c);
+          if(si>=0&&r[si]&&!skuMap[p])skuMap[p]=String(r[si]||'').trim();
         });
         Object.entries(map).forEach(([parent,children])=>{
           const existing=S.parentChild.find(pc=>pc.parent===parent);
-          if(existing){children.forEach(c=>{if(!existing.children.includes(c))existing.children.push(c);});}
-          else S.parentChild.push({parent,children});
+          const pSku=skuMap[parent]||lookupSku(parent)||'';
+          if(existing){
+            children.forEach(c=>{if(!existing.children.includes(c))existing.children.push(c);});
+            if(pSku&&!existing.parentSku)existing.parentSku=pSku;
+          } else {
+            S.parentChild.push({parent,parentSku:pSku,children});
+          }
         });
         saveS();renderPC();broadcastPC();toast(`导入 ${Object.keys(map).length} 组父子关系`);
       }catch(er){toast('解析失败：'+er.message,'err');}
@@ -1539,6 +1564,40 @@ function sortBy(k){
   renderResTbl(filteredRes);
 }
 
+function initStatDrag(row){
+  let dragSi=null;
+  const cards=row.querySelectorAll('.stat');
+  const clearHL=()=>cards.forEach(s=>{s.classList.remove('drag-over-left','drag-over-right');});
+  cards.forEach(el=>{
+    el.addEventListener('dragstart',e=>{
+      dragSi=+el.dataset.si;
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('text/plain',String(dragSi));
+    });
+    el.addEventListener('dragend',()=>{el.classList.remove('dragging');clearHL();dragSi=null;});
+    el.addEventListener('dragover',e=>{
+      e.preventDefault();e.dataTransfer.dropEffect='move';
+      clearHL();
+      const rect=el.getBoundingClientRect();
+      const mid=rect.left+rect.width/2;
+      el.classList.add(e.clientX<mid?'drag-over-left':'drag-over-right');
+    });
+    el.addEventListener('dragleave',()=>{el.classList.remove('drag-over-left','drag-over-right');});
+    el.addEventListener('drop',e=>{
+      e.preventDefault();clearHL();
+      const dropSi=+el.dataset.si;
+      if(dragSi!==null&&dragSi!==dropSi){
+        const cur=S.statOrder&&S.statOrder.length===4?[...S.statOrder]:[0,1,2,3];
+        const moved=cur.splice(dragSi,1)[0];
+        const insertAt=dragSi<dropSi?dropSi:dropSi;
+        cur.splice(insertAt,0,moved);
+        S.statOrder=cur;saveS();renderResults();
+      }
+    });
+  });
+}
+
 function runCalc(){
   if(!S.master.length&&!S.sources.length){toast('请先导入数据','err');return;}
   const merged=getMerged();
@@ -1597,22 +1656,7 @@ function renderResults(){
   const order=S.statOrder&&S.statOrder.length===statCards.length?S.statOrder:[0,1,2,3];
   const row=document.getElementById('statRow');
   row.innerHTML=order.map((idx,pos)=>`<div class="stat" draggable="true" data-si="${pos}"><div class="stat-val">${statCards[idx].val}</div><div class="stat-lbl">${statCards[idx].lbl}</div></div>`).join('');
-  // Drag-and-drop reorder
-  let dragIdx=null;
-  row.querySelectorAll('.stat').forEach(el=>{
-    el.addEventListener('dragstart',e=>{dragIdx=+el.dataset.si;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
-    el.addEventListener('dragend',()=>{el.classList.remove('dragging');row.querySelectorAll('.stat').forEach(s=>s.classList.remove('drag-over'));});
-    el.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';el.classList.add('drag-over');});
-    el.addEventListener('dragleave',()=>{el.classList.remove('drag-over');});
-    el.addEventListener('drop',e=>{e.preventDefault();el.classList.remove('drag-over');
-      const dropIdx=+el.dataset.si;
-      if(dragIdx!==null&&dragIdx!==dropIdx){
-        const cur=S.statOrder&&S.statOrder.length===4?[...S.statOrder]:[0,1,2,3];
-        const moved=cur.splice(dragIdx,1)[0];cur.splice(dropIdx,0,moved);
-        S.statOrder=cur;saveS();renderResults();
-      }
-    });
-  });
+  initStatDrag(row);
   applyFilter();
 }
 
