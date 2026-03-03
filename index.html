@@ -204,6 +204,10 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 .collapse-toggle:hover{text-decoration:underline}
 .del-col{cursor:pointer;color:#dc2626;margin-left:6px;font-weight:400;font-size:12px}
 .del-col:hover{color:#991b1b}
+.stat[draggable="true"]{cursor:grab;transition:transform .15s,opacity .15s}
+.stat[draggable="true"]:active{cursor:grabbing}
+.stat.dragging{opacity:.4;transform:scale(.95)}
+.stat.drag-over{outline:2px dashed #2563a8;outline-offset:2px}
 </style>
 </head>
 <body>
@@ -298,7 +302,7 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
     </div>
     <div class="alert alert-info">💡 导入Excel需包含"父ASIN"和"子ASIN"两列。子ASIN以标签展示，输入后按回车添加。</div>
     <div class="tbl-wrap">
-      <table><thead><tr><th>父ASIN</th><th>子ASIN列表</th><th style="width:70px">操作</th></tr></thead>
+      <table><thead><tr><th>父ASIN</th><th>父SKU</th><th>子ASIN列表</th><th style="width:70px">操作</th></tr></thead>
       <tbody id="pcBody"></tbody></table>
     </div>
     <div id="pcEmpty" style="text-align:center;padding:16px;color:#9ca3af;font-size:13px">暂无父子关系配置</div>
@@ -478,7 +482,7 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
     <div class="priority-note">优先级：子ASIN单独配置 &gt; 父ASIN配置 &gt; 全局配置</div>
     <div style="margin-bottom:10px"><button class="btn btn-primary btn-sm" onclick="addParentOverride()">➕ 添加</button></div>
     <div class="tbl-wrap">
-      <table><thead><tr><th>父ASIN</th><th>运输天数</th><th>备货天数</th><th>保底可售天数</th><th>生产天数</th><th>加权系数</th><th>促销销量</th><th>操作</th></tr></thead>
+      <table><thead><tr><th>父ASIN</th><th>父SKU</th><th>运输天数</th><th>备货天数</th><th>保底可售天数</th><th>生产天数</th><th>加权系数</th><th>促销销量</th><th>操作</th></tr></thead>
       <tbody id="parentOverrideBody"></tbody></table>
     </div>
     <div id="parentOverrideEmpty" style="text-align:center;padding:16px;color:#9ca3af;font-size:13px">暂无父ASIN覆盖配置</div>
@@ -689,6 +693,7 @@ let S = {
   results: [],
   _pending: null,
   _fileQueue: [],
+  statOrder: null,  // custom stat card order: array of indices [0,1,2,3]
 };
 
 function defFormulas(){
@@ -740,6 +745,11 @@ function buildParentToChildrenMap(){
   S.parentChild.forEach(pc=>{m[pc.parent]=[...(pc.children||[])];});
   return m;
 }
+function lookupSku(asin){
+  if(!asin)return '';
+  const r=S.master.find(m=>m.asin===asin);
+  return r&&r.sku?r.sku:'';
+}
 
 // ── BroadcastChannel ────────────────────────────────────────
 const BC_CHANNEL='replenishment_sync';
@@ -760,8 +770,9 @@ function initBC(){
 }
 function broadcastMaster(){try{_bc&&_bc.postMessage({type:'masterUpdate',master:S.master,masterCols:S.masterCols});}catch(e){}}
 function broadcastPC(){try{_bc&&_bc.postMessage({type:'pcUpdate',parentChild:S.parentChild});}catch(e){}}
-function openMasterNewWin(){window.open(location.href,'masterWin','width=900,height=600');}
-function openPCNewWin(){window.open(location.href,'pcWin','width=900,height=600');}
+function _baseUrl(){return location.href.split('?')[0];}
+function openMasterNewWin(){window.open(_baseUrl()+'?view=master','masterWin','width=960,height=620');}
+function openPCNewWin(){window.open(_baseUrl()+'?view=pc','pcWin','width=960,height=620');}
 
 // ── Toast ──────────────────────────────────────────────────
 function toast(msg,type='ok'){
@@ -902,6 +913,7 @@ function renderPC(){
   e.style.display='none';
   b.innerHTML=S.parentChild.map((pc,i)=>`<tr>
     <td><input class="form-control form-control-sm" style="min-width:130px" value="${esc(pc.parent||'')}" onchange="upPC(${i},this.value)" placeholder="父ASIN"></td>
+    <td style="font-size:12px;color:#6b7280;font-family:monospace">${esc(lookupSku(pc.parent))||'<span style="color:#ccc">-</span>'}</td>
     <td>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
         ${(pc.children||[]).map((c,j)=>`<span class="child-badge">${esc(c)}<span class="del-child" onclick="delPCChild(${i},${j})">×</span></span>`).join('')}
@@ -1316,6 +1328,7 @@ function renderParentOverrides(){
   e.style.display='none';
   b.innerHTML=S.parentOverrides.map((o,i)=>`<tr>
     <td><input class="form-control form-control-sm" style="min-width:130px" value="${esc(o.parentAsin||'')}" onchange="upParentOv(${i},'parentAsin',this.value)" placeholder="父ASIN"></td>
+    <td style="font-size:12px;color:#6b7280;font-family:monospace">${esc(lookupSku(o.parentAsin))||'-'}</td>
     ${['transport','prepare','minAvail','prodDays','wCoeff','promo'].map(f=>`<td><input type="number" class="form-control form-control-sm" style="width:80px" value="${o[f]||''}" onchange="upParentOv(${i},'${f}',this.value)" placeholder="默认"></td>`).join('')}
     <td><button class="btn btn-danger btn-xs" onclick="delParentOv(${i})">删除</button></td>
   </tr>`).join('');
@@ -1396,6 +1409,7 @@ function renderParentFormulas(){
         <div style="display:flex;align-items:center;gap:8px">
           <span class="collapse-toggle" onclick="togglePF(${pi})" id="pfToggle_${pi}">▶</span>
           <strong style="color:#1e40af">父ASIN：${esc(pf.parentAsin)}</strong>
+          <span style="color:#6b7280;font-size:12px;font-family:monospace">父SKU：${esc(lookupSku(pf.parentAsin))||'-'}</span>
           <span class="badge badge-blue">${all.length} 个公式</span>
         </div>
         <button class="btn btn-danger btn-xs" onclick="delParentFormula(${pi})">删除</button>
@@ -1501,7 +1515,7 @@ function calcForAsin(data,gp,ov,optFormulas,optCustomF){
 // TAB 4 – RESULTS
 // ======================================================================
 const RES_COLS=[
-  {k:'asin',l:'ASIN'},{k:'parentAsin',l:'父ASIN'},{k:'sku',l:'SKU'},{k:'ean',l:'EAN'},{k:'name',l:'品名'},
+  {k:'asin',l:'ASIN'},{k:'parentAsin',l:'父ASIN'},{k:'parentSku',l:'父SKU'},{k:'sku',l:'SKU'},{k:'ean',l:'EAN'},{k:'name',l:'品名'},
   {k:'replenishment',l:'补货数量'},{k:'production',l:'生产数量'},
   {k:'theoreticalShipment',l:'理论发货数量'},{k:'actualShipment',l:'实际发货数量'},
   {k:'sales7',l:'7天销量'},{k:'sales14',l:'14天销量'},{k:'sales30',l:'30天销量'},
@@ -1517,7 +1531,7 @@ let filteredRes=[];
 let sortKey='';
 let sortDir=1; // 1=升序 -1=降序
 
-const NO_SORT_COLS=new Set(['asin','parentAsin','sku','ean','name']);
+const NO_SORT_COLS=new Set(['asin','parentAsin','parentSku','sku','ean','name']);
 
 function sortBy(k){
   if(sortKey===k)sortDir*=-1;
@@ -1556,7 +1570,8 @@ function runCalc(){
       useCustomF=parentFMap[parentAsin].customF;
     }
     const calc=calcForAsin(d,S.params,ovParams,useFormulas,useCustomF);
-    S.results.push({asin,sku:m.sku||'',ean:m.ean||'',name:m.name||'',parentAsin,...calc});
+    const parentSku=parentAsin?lookupSku(parentAsin):'';
+    S.results.push({asin,sku:m.sku||'',ean:m.ean||'',name:m.name||'',parentAsin,parentSku,...calc});
   });
   saveS();renderResults();toast(`计算完成，共 ${S.results.length} 条`);
 }
@@ -1573,11 +1588,31 @@ function renderResults(){
   const needR=S.results.filter(r=>typeof r.replenishment==='number'&&r.replenishment>0).length;
   const sumR=S.results.reduce((s,r)=>s+(typeof r.replenishment==='number'?Math.max(0,r.replenishment):0),0);
   const sumP=S.results.reduce((s,r)=>s+(typeof r.production==='number'?Math.max(0,r.production):0),0);
-  document.getElementById('statRow').innerHTML=`
-    <div class="stat"><div class="stat-val">${tot}</div><div class="stat-lbl">产品总数</div></div>
-    <div class="stat"><div class="stat-val">${needR}</div><div class="stat-lbl">需补货产品</div></div>
-    <div class="stat"><div class="stat-val">${Math.round(sumR).toLocaleString()}</div><div class="stat-lbl">总补货数量</div></div>
-    <div class="stat"><div class="stat-val">${Math.round(sumP).toLocaleString()}</div><div class="stat-lbl">总生产数量</div></div>`;
+  const statCards=[
+    {val:tot, lbl:'产品总数'},
+    {val:needR, lbl:'需补货产品'},
+    {val:Math.round(sumR).toLocaleString(), lbl:'总补货数量'},
+    {val:Math.round(sumP).toLocaleString(), lbl:'总生产数量'},
+  ];
+  const order=S.statOrder&&S.statOrder.length===statCards.length?S.statOrder:[0,1,2,3];
+  const row=document.getElementById('statRow');
+  row.innerHTML=order.map((idx,pos)=>`<div class="stat" draggable="true" data-si="${pos}"><div class="stat-val">${statCards[idx].val}</div><div class="stat-lbl">${statCards[idx].lbl}</div></div>`).join('');
+  // Drag-and-drop reorder
+  let dragIdx=null;
+  row.querySelectorAll('.stat').forEach(el=>{
+    el.addEventListener('dragstart',e=>{dragIdx=+el.dataset.si;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
+    el.addEventListener('dragend',()=>{el.classList.remove('dragging');row.querySelectorAll('.stat').forEach(s=>s.classList.remove('drag-over'));});
+    el.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';el.classList.add('drag-over');});
+    el.addEventListener('dragleave',()=>{el.classList.remove('drag-over');});
+    el.addEventListener('drop',e=>{e.preventDefault();el.classList.remove('drag-over');
+      const dropIdx=+el.dataset.si;
+      if(dragIdx!==null&&dragIdx!==dropIdx){
+        const cur=S.statOrder&&S.statOrder.length===4?[...S.statOrder]:[0,1,2,3];
+        const moved=cur.splice(dragIdx,1)[0];cur.splice(dropIdx,0,moved);
+        S.statOrder=cur;saveS();renderResults();
+      }
+    });
+  });
   applyFilter();
 }
 
@@ -1588,7 +1623,7 @@ function applyFilter(){
     if(ft==='pos'&&!(r.replenishment>0))return false;
     if(ft==='neg'&&!(r.replenishment<=0))return false;
     if(fs){
-      const m=[r.asin,r.sku,r.name,r.parentAsin].some(v=>String(v||'').toLowerCase().includes(fs));
+      const m=[r.asin,r.sku,r.name,r.parentAsin,r.parentSku].some(v=>String(v||'').toLowerCase().includes(fs));
       if(!m)return false;
     }
     return true;
@@ -1627,7 +1662,7 @@ function renderResTbl(rows){
     if((c.k==='replenishment'||c.k==='production')&&typeof v==='number'){
       if(v>0)cls='pos';else cls='neg';
     }
-    return `<td class="${cls}" ${c.k==='asin'||c.k==='sku'?'style="font-family:monospace"':''}>${esc(String(disp))}</td>`;
+    return `<td class="${cls}" ${['asin','sku','parentAsin','parentSku'].includes(c.k)?'style="font-family:monospace"':''}>${esc(String(disp))}</td>`;
   }).join('')}</tr>`).join('');
   document.getElementById('resultWrap').style.display='block';
 }
@@ -1940,6 +1975,30 @@ function enterApp(){
   document.getElementById('appWrap').classList.add('visible');
   document.getElementById('hdrUser').textContent=AUTH_USER;
   loadS(); renderMaster(); renderPC(); updHdr(); renderFormulas(); initBC();
+  applySubWindowMode();
+}
+
+function applySubWindowMode(){
+  const params=new URLSearchParams(location.search);
+  const view=params.get('view');
+  if(!view)return;
+  // Hide header tabs and show only the relevant card
+  document.querySelector('.tabs').style.display='none';
+  document.querySelector('.header').style.display='none';
+  document.querySelector('.content').style.padding='12px';
+  // Show Tab 0
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('p0').classList.add('active');
+  const cards=document.getElementById('p0').querySelectorAll(':scope>.card');
+  if(view==='master'){
+    // Show only master card
+    if(cards[1])cards[1].style.display='none';
+    document.title='基础信息管理';
+  }else if(view==='pc'){
+    // Show only parent-child card
+    if(cards[0])cards[0].style.display='none';
+    document.title='父子关系管理';
+  }
 }
 
 // 页面加载时检查是否已登录
