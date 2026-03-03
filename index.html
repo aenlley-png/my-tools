@@ -67,7 +67,7 @@ textarea.form-control{resize:vertical;font-family:'Consolas','Courier New',monos
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th{background:#f0f4f8;color:#1a3c5e;font-weight:600;padding:9px 11px;text-align:left;border-bottom:2px solid #dde4ee;white-space:nowrap;position:sticky;top:0;z-index:5}
-td{padding:8px 11px;border-bottom:1px solid #edf0f6;vertical-align:middle}
+td{padding:8px 11px;border-bottom:1px solid #edf0f6;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
 tr:hover td{background:#f8fbff}
 .tbl-scroll{max-height:460px;overflow-y:auto}
 
@@ -204,13 +204,19 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 .collapse-toggle:hover{text-decoration:underline}
 .del-col{cursor:pointer;color:#dc2626;margin-left:6px;font-weight:400;font-size:12px}
 .del-col:hover{color:#991b1b}
-.stat-row-flex{display:flex;gap:16px;margin-bottom:16px}
-.stat-row-flex .stat{flex:1;min-width:0}
-.stat[draggable="true"]{cursor:grab;user-select:none;transition:transform .15s,box-shadow .15s}
-.stat[draggable="true"]:hover{box-shadow:0 2px 10px rgba(0,0,0,.12)}
-.stat.dragging{opacity:.35;transform:scale(.92)}
-.stat.drag-over-left{box-shadow:-3px 0 0 0 #2563a8,0 2px 10px rgba(37,99,168,.2)}
-.stat.drag-over-right{box-shadow:3px 0 0 0 #2563a8,0 2px 10px rgba(37,99,168,.2)}
+.stat-row-wrap{display:flex;align-items:flex-start;gap:10px;margin-bottom:16px}
+.stat-row-cards{display:flex;gap:16px;flex:1;min-width:0;flex-wrap:wrap}
+.stat-row-cards .stat{flex:1;min-width:140px}
+.stat-cfg-btn{background:#fff;border:1px solid #d1d9e6;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px;color:#6b7280;white-space:nowrap;transition:.2s}
+.stat-cfg-btn:hover{background:#f5f8ff;color:#2563a8;border-color:#2563a8}
+.stat-cfg-panel{background:#fff;border:1px solid #d1d9e6;border-radius:8px;padding:14px;box-shadow:0 4px 16px rgba(0,0,0,.1);min-width:240px;position:absolute;right:0;top:36px;z-index:50;display:none}
+.stat-cfg-panel.open{display:block}
+.stat-cfg-item{display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:4px;font-size:13px}
+.stat-cfg-item:hover{background:#f5f8ff}
+.stat-cfg-item label{flex:1;cursor:pointer;display:flex;align-items:center;gap:6px;margin:0}
+.stat-cfg-arrows{display:flex;flex-direction:column;gap:1px}
+.stat-cfg-arrows button{background:none;border:none;cursor:pointer;font-size:11px;color:#9ca3af;padding:0 3px;line-height:1}
+.stat-cfg-arrows button:hover{color:#2563a8}
 </style>
 </head>
 <body>
@@ -557,7 +563,13 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 
 <!-- ===== TAB 4: RESULTS ===== -->
 <div class="pane" id="p4">
-  <div class="stat-row-flex" id="statRow"></div>
+  <div class="stat-row-wrap">
+    <div class="stat-row-cards" id="statRow"></div>
+    <div style="position:relative">
+      <button class="stat-cfg-btn" onclick="toggleStatCfg()">⚙ 设置</button>
+      <div class="stat-cfg-panel" id="statCfgPanel"></div>
+    </div>
+  </div>
   <div class="card">
     <div class="card-title">🧮 计算结果</div>
     <div class="btn-group" style="margin-bottom:12px">
@@ -696,7 +708,7 @@ let S = {
   results: [],
   _pending: null,
   _fileQueue: [],
-  statOrder: null,  // custom stat card order: array of indices [0,1,2,3]
+  statConfig: null,  // [{id,visible}] order = display order
 };
 
 function defFormulas(){
@@ -1564,38 +1576,77 @@ function sortBy(k){
   renderResTbl(filteredRes);
 }
 
-function initStatDrag(row){
-  let dragSi=null;
-  const cards=row.querySelectorAll('.stat');
-  const clearHL=()=>cards.forEach(s=>{s.classList.remove('drag-over-left','drag-over-right');});
-  cards.forEach(el=>{
-    el.addEventListener('dragstart',e=>{
-      dragSi=+el.dataset.si;
-      el.classList.add('dragging');
-      e.dataTransfer.effectAllowed='move';
-      e.dataTransfer.setData('text/plain',String(dragSi));
-    });
-    el.addEventListener('dragend',()=>{el.classList.remove('dragging');clearHL();dragSi=null;});
-    el.addEventListener('dragover',e=>{
-      e.preventDefault();e.dataTransfer.dropEffect='move';
-      clearHL();
-      const rect=el.getBoundingClientRect();
-      const mid=rect.left+rect.width/2;
-      el.classList.add(e.clientX<mid?'drag-over-left':'drag-over-right');
-    });
-    el.addEventListener('dragleave',()=>{el.classList.remove('drag-over-left','drag-over-right');});
-    el.addEventListener('drop',e=>{
-      e.preventDefault();clearHL();
-      const dropSi=+el.dataset.si;
-      if(dragSi!==null&&dragSi!==dropSi){
-        const cur=S.statOrder&&S.statOrder.length===4?[...S.statOrder]:[0,1,2,3];
-        const moved=cur.splice(dragSi,1)[0];
-        const insertAt=dragSi<dropSi?dropSi:dropSi;
-        cur.splice(insertAt,0,moved);
-        S.statOrder=cur;saveS();renderResults();
-      }
-    });
-  });
+// ── Stat config ─────────────────────────────────────────────
+const STAT_DEFS=[
+  {id:0, lbl:'产品总数'},
+  {id:1, lbl:'需补货产品'},
+  {id:2, lbl:'总补货数量'},
+  {id:3, lbl:'总生产数量'},
+];
+function getStatConfig(){
+  if(S.statConfig&&S.statConfig.length===STAT_DEFS.length)return S.statConfig;
+  return STAT_DEFS.map(d=>({id:d.id,visible:true}));
+}
+function toggleStatCfg(){
+  document.getElementById('statCfgPanel').classList.toggle('open');
+  renderStatCfgPanel();
+}
+function renderStatCfgPanel(){
+  const cfg=getStatConfig();
+  document.getElementById('statCfgPanel').innerHTML=`
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:#1a3c5e">指标显示设置</div>
+    ${cfg.map((c,i)=>{
+      const def=STAT_DEFS.find(d=>d.id===c.id);
+      return `<div class="stat-cfg-item">
+        <label><input type="checkbox" ${c.visible?'checked':''} onchange="setStatVisible(${i},this.checked)"> ${def?def.lbl:'指标'+c.id}</label>
+        <div class="stat-cfg-arrows">
+          <button onclick="moveStatUp(${i})" title="上移" ${i===0?'disabled':''}>▲</button>
+          <button onclick="moveStatDown(${i})" title="下移" ${i===cfg.length-1?'disabled':''}>▼</button>
+        </div>
+      </div>`;
+    }).join('')}
+    <div style="margin-top:8px;text-align:right">
+      <button class="btn btn-ghost btn-xs" onclick="resetStatConfig()">恢复默认</button>
+    </div>`;
+}
+function setStatVisible(i,v){
+  const cfg=getStatConfig();cfg[i].visible=v;
+  S.statConfig=cfg;saveS();renderStatCards();renderStatCfgPanel();
+}
+function moveStatUp(i){
+  if(i<=0)return;const cfg=getStatConfig();
+  [cfg[i-1],cfg[i]]=[cfg[i],cfg[i-1]];
+  S.statConfig=cfg;saveS();renderStatCards();renderStatCfgPanel();
+}
+function moveStatDown(i){
+  const cfg=getStatConfig();if(i>=cfg.length-1)return;
+  [cfg[i],cfg[i+1]]=[cfg[i+1],cfg[i]];
+  S.statConfig=cfg;saveS();renderStatCards();renderStatCfgPanel();
+}
+function resetStatConfig(){
+  S.statConfig=null;saveS();renderStatCards();renderStatCfgPanel();
+}
+// Close panel when clicking outside
+document.addEventListener('click',e=>{
+  const panel=document.getElementById('statCfgPanel');
+  if(!panel)return;
+  if(!e.target.closest('.stat-cfg-panel')&&!e.target.closest('.stat-cfg-btn')){
+    panel.classList.remove('open');
+  }
+});
+
+function renderStatCards(){
+  const tot=S.results.length;
+  const needR=S.results.filter(r=>typeof r.replenishment==='number'&&r.replenishment>0).length;
+  const sumR=S.results.reduce((s,r)=>s+(typeof r.replenishment==='number'?Math.max(0,r.replenishment):0),0);
+  const sumP=S.results.reduce((s,r)=>s+(typeof r.production==='number'?Math.max(0,r.production):0),0);
+  const vals=[tot,needR,Math.round(sumR).toLocaleString(),Math.round(sumP).toLocaleString()];
+  const cfg=getStatConfig();
+  const row=document.getElementById('statRow');
+  row.innerHTML=cfg.filter(c=>c.visible).map(c=>{
+    const def=STAT_DEFS.find(d=>d.id===c.id);
+    return `<div class="stat"><div class="stat-val">${vals[c.id]}</div><div class="stat-lbl">${def?def.lbl:''}</div></div>`;
+  }).join('');
 }
 
 function runCalc(){
@@ -1643,20 +1694,7 @@ function renderResults(){
     return;
   }
   document.getElementById('resultEmpty').style.display='none';
-  const tot=S.results.length;
-  const needR=S.results.filter(r=>typeof r.replenishment==='number'&&r.replenishment>0).length;
-  const sumR=S.results.reduce((s,r)=>s+(typeof r.replenishment==='number'?Math.max(0,r.replenishment):0),0);
-  const sumP=S.results.reduce((s,r)=>s+(typeof r.production==='number'?Math.max(0,r.production):0),0);
-  const statCards=[
-    {val:tot, lbl:'产品总数'},
-    {val:needR, lbl:'需补货产品'},
-    {val:Math.round(sumR).toLocaleString(), lbl:'总补货数量'},
-    {val:Math.round(sumP).toLocaleString(), lbl:'总生产数量'},
-  ];
-  const order=S.statOrder&&S.statOrder.length===statCards.length?S.statOrder:[0,1,2,3];
-  const row=document.getElementById('statRow');
-  row.innerHTML=order.map((idx,pos)=>`<div class="stat" draggable="true" data-si="${pos}"><div class="stat-val">${statCards[idx].val}</div><div class="stat-lbl">${statCards[idx].lbl}</div></div>`).join('');
-  initStatDrag(row);
+  renderStatCards();
   applyFilter();
 }
 
@@ -1700,13 +1738,16 @@ function renderResTbl(rows){
   }).join('')}</tr>`;
 
   document.getElementById('resultBody').innerHTML=sorted.map(r=>`<tr>${cols.map(c=>{
-    const v=r[c.k];
-    let disp=v!==undefined?(typeof v==='number'?Math.round(v*100)/100:v):'-';
+    let v=r[c.k];
+    // parentSku: always do a fresh lookup as fallback
+    if(c.k==='parentSku'&&!v&&r.parentAsin) v=lookupSku(r.parentAsin);
+    let disp=v!==undefined&&v!==''?(typeof v==='number'?Math.round(v*100)/100:v):'-';
     let cls='';
     if((c.k==='replenishment'||c.k==='production')&&typeof v==='number'){
       if(v>0)cls='pos';else cls='neg';
     }
-    return `<td class="${cls}" ${['asin','sku','parentAsin','parentSku'].includes(c.k)?'style="font-family:monospace"':''}>${esc(String(disp))}</td>`;
+    const isMono=['asin','sku','parentAsin','parentSku'].includes(c.k);
+    return `<td class="${cls}" ${isMono?'style="font-family:monospace"':''} title="${esc(String(disp))}">${esc(String(disp))}</td>`;
   }).join('')}</tr>`).join('');
   document.getElementById('resultWrap').style.display='block';
 }
@@ -1719,7 +1760,9 @@ function doExport(type){
   else if(type==='production')cols=cols.filter(c=>c.k!=='replenishment');
   const src=filteredRes.length?filteredRes:S.results;
   const data=[cols.map(c=>c.l),...src.map(r=>cols.map(c=>{
-    const v=r[c.k];return typeof v==='number'?Math.round(v*100)/100:(v||'');
+    let v=r[c.k];
+    if(c.k==='parentSku'&&!v&&r.parentAsin) v=lookupSku(r.parentAsin);
+    return typeof v==='number'?Math.round(v*100)/100:(v||'');
   }))];
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(data);
