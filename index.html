@@ -192,6 +192,18 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 .btn-logout{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.35);color:#fff;padding:5px 12px;font-size:12px;border-radius:6px;cursor:pointer;transition:.2s}
 .btn-logout:hover{background:rgba(255,255,255,.25)}
 .user-info{font-size:12px;opacity:.8;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Parent-child badges */
+.child-badge{display:inline-flex;align-items:center;gap:3px;background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-size:11px;margin:2px;font-family:monospace}
+.child-badge .del-child{cursor:pointer;color:#dc2626;font-weight:700;font-size:13px;margin-left:2px}
+.child-badge .del-child:hover{color:#991b1b}
+.btn-newwin{background:none;border:1px solid #d1d9e6;border-radius:4px;cursor:pointer;font-size:12px;padding:3px 8px;color:#2563a8;margin-left:auto}
+.btn-newwin:hover{background:#eff6ff}
+.priority-note{font-size:12px;color:#6b7280;line-height:1.6;padding:8px 12px;background:#f9fafb;border-radius:6px;border-left:3px solid #d1d9e6;margin-bottom:10px}
+.collapse-toggle{cursor:pointer;user-select:none;color:#2563a8;font-size:13px;font-weight:600}
+.collapse-toggle:hover{text-decoration:underline}
+.del-col{cursor:pointer;color:#dc2626;margin-left:6px;font-weight:400;font-size:12px}
+.del-col:hover{color:#991b1b}
 </style>
 </head>
 <body>
@@ -255,22 +267,41 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 <!-- ===== TAB 0: MASTER DATA ===== -->
 <div class="pane active" id="p0">
   <div class="card">
-    <div class="card-title">📋 基础信息管理 <span>管理产品的 ASIN / SKU / EAN / 品名</span></div>
+    <div class="card-title">📋 基础信息管理 <span>管理产品基础信息（动态列）</span>
+      <button class="btn-newwin" onclick="openMasterNewWin()" title="在新窗口中打开">🔲 新窗口打开</button>
+    </div>
     <div class="btn-group" style="margin-bottom:12px">
       <button class="btn btn-primary btn-sm" onclick="addMaster()">➕ 新增行</button>
       <button class="btn btn-success btn-sm" onclick="openMasterImport()">📥 Excel导入</button>
       <button class="btn btn-secondary btn-sm" onclick="openMasterPaste()">📋 粘贴导入</button>
       <button class="btn btn-outline btn-sm" onclick="exportMasterTpl()">📤 导出模板</button>
+      <button class="btn btn-outline btn-sm" onclick="addMasterCol()">＋列 添加列</button>
       <button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="clearMaster()">🗑️ 清空</button>
     </div>
-    <div class="alert alert-info">💡 基础数据是计算基础。支持 Excel 导入（含ASIN列）或粘贴复制自 Excel 的数据。</div>
+    <div class="alert alert-info">💡 基础数据是计算基础。支持 Excel 导入（含ASIN列）或粘贴复制自 Excel 的数据。可通过"添加列"扩展字段。</div>
     <div class="tbl-wrap tbl-scroll">
       <table id="masterTbl">
-        <thead><tr><th style="width:38px">#</th><th>ASIN</th><th>SKU</th><th>EAN</th><th>品名</th><th style="width:70px">操作</th></tr></thead>
+        <thead><tr id="masterHead"></tr></thead>
         <tbody id="masterBody"></tbody>
       </table>
     </div>
     <div class="empty" id="masterEmpty"><div class="empty-icon">📋</div><div class="empty-text">暂无基础数据</div><div class="empty-sub">点击"新增行"手动添加，或通过"Excel导入"批量导入</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">👪 父子关系管理 <span>设置父ASIN与子ASIN的关联</span>
+      <button class="btn-newwin" onclick="openPCNewWin()" title="在新窗口中打开">🔲 新窗口打开</button>
+    </div>
+    <div class="btn-group" style="margin-bottom:12px">
+      <button class="btn btn-primary btn-sm" onclick="addPC()">➕ 添加父子关系</button>
+      <button class="btn btn-success btn-sm" onclick="openPCImport()">📥 Excel导入</button>
+    </div>
+    <div class="alert alert-info">💡 导入Excel需包含"父ASIN"和"子ASIN"两列。子ASIN以标签展示，输入后按回车添加。</div>
+    <div class="tbl-wrap">
+      <table><thead><tr><th>父ASIN</th><th>子ASIN列表</th><th style="width:70px">操作</th></tr></thead>
+      <tbody id="pcBody"></tbody></table>
+    </div>
+    <div id="pcEmpty" style="text-align:center;padding:16px;color:#9ca3af;font-size:13px">暂无父子关系配置</div>
   </div>
 </div>
 
@@ -442,6 +473,16 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
     </div>
     <div id="overrideEmpty" style="text-align:center;padding:16px;color:#9ca3af;font-size:13px">暂无覆盖配置，所有 ASIN 使用全局参数</div>
   </div>
+  <div class="card">
+    <div class="card-title">👪 父ASIN 级参数覆盖 <span>对特定父ASIN下的所有子ASIN设置相同参数</span></div>
+    <div class="priority-note">优先级：子ASIN单独配置 &gt; 父ASIN配置 &gt; 全局配置</div>
+    <div style="margin-bottom:10px"><button class="btn btn-primary btn-sm" onclick="addParentOverride()">➕ 添加</button></div>
+    <div class="tbl-wrap">
+      <table><thead><tr><th>父ASIN</th><th>运输天数</th><th>备货天数</th><th>保底可售天数</th><th>生产天数</th><th>加权系数</th><th>促销销量</th><th>操作</th></tr></thead>
+      <tbody id="parentOverrideBody"></tbody></table>
+    </div>
+    <div id="parentOverrideEmpty" style="text-align:center;padding:16px;color:#9ca3af;font-size:13px">暂无父ASIN覆盖配置</div>
+  </div>
   <div style="text-align:right">
     <button class="btn btn-primary" onclick="saveParams()">💾 保存参数</button>
   </div>
@@ -498,6 +539,13 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
     <button class="btn btn-ghost" onclick="resetFormulas()">🔄 恢复默认</button>
     <button class="btn btn-warning" onclick="testFormulas()">🧪 测试公式</button>
   </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="card-title">👪 父ASIN 级公式覆盖 <span>为特定父ASIN设置独立公式组</span></div>
+    <div class="priority-note">未配置的父ASIN使用全局公式。子ASIN使用其父ASIN的公式（如已配置）。</div>
+    <div style="margin-bottom:10px"><button class="btn btn-primary btn-sm" onclick="addParentFormula()">➕ 添加父ASIN公式组</button></div>
+    <div id="parentFormulaList"></div>
+  </div>
 </div>
 
 <!-- ===== TAB 4: RESULTS ===== -->
@@ -550,19 +598,7 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
       </div>
       <input type="file" id="masterFileIn" accept=".xlsx,.xls,.csv" style="display:none" onchange="onMasterFile(event)">
     </div>
-    <div id="mColMap" style="display:none">
-      <hr>
-      <h4 style="margin-bottom:10px;font-size:14px">列名映射</h4>
-      <div class="grid-2">
-        <div class="form-group"><label class="form-label">ASIN 列</label><select id="mMapAsin" class="form-control"><option value="">-- 请选择 --</option></select></div>
-        <div class="form-group"><label class="form-label">SKU 列</label><select id="mMapSku" class="form-control"><option value="">-- 不映射 --</option></select></div>
-        <div class="form-group"><label class="form-label">EAN 列</label><select id="mMapEan" class="form-control"><option value="">-- 不映射 --</option></select></div>
-        <div class="form-group"><label class="form-label">品名 列</label><select id="mMapName" class="form-control"><option value="">-- 不映射 --</option></select></div>
-      </div>
-      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px">
-        <input type="checkbox" id="mMerge" checked> 与现有数据合并（不勾选则覆盖）
-      </label>
-    </div>
+    <div id="mColMap" style="display:none"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost btn-sm" onclick="closeOv('mImportOv')">取消</button>
       <button class="btn btn-primary btn-sm" id="mImportBtn" style="display:none" onclick="confirmMasterImport()">确认导入</button>
@@ -615,7 +651,7 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
     <div class="alert alert-info" id="colMapInfo"></div>
     <div id="colMapBody"></div>
     <div class="modal-footer">
-      <button class="btn btn-ghost btn-sm" onclick="closeOv('colMapOv')">取消</button>
+      <button class="btn btn-ghost btn-sm" onclick="cancelColMap()">取消</button>
       <button class="btn btn-primary btn-sm" onclick="confirmColMap()">确认导入</button>
     </div>
   </div>
@@ -637,7 +673,14 @@ hr{border:none;border-top:1px solid #eaeef5;margin:14px 0}
 // ── State ──────────────────────────────────────────────────
 const SK = 'replenishment_v3';
 let S = {
-  master: [],           // [{asin,sku,ean,name}]
+  master: [],           // [{asin,sku,ean,name,...}]
+  masterCols: [
+    {key:'asin', label:'ASIN', required:true},
+    {key:'sku', label:'SKU'}, {key:'ean', label:'EAN'}, {key:'name', label:'品名'}
+  ],
+  parentChild: [],      // [{parent:'B0xxx', children:['B0aaa','B0bbb']}]
+  parentOverrides: [],  // [{parentAsin,transport?,prepare?,minAvail?,prodDays?,wCoeff?,promo?}]
+  parentFormulas: [],   // [{parentAsin, formulas:[...], customF:[...]}]
   sources: [],          // [{id,name,fields:[],data:{asin:{}},rowCount}]
   params: {w7:50,w14:30,w30:20,wCoeff:1,transport:30,prepare:7,minAvail:30,prodDays:45},
   overrides: [],        // [{asin,transport?,prepare?,minAvail?,prodDays?,wCoeff?,promo?}]
@@ -645,6 +688,7 @@ let S = {
   customF: [],
   results: [],
   _pending: null,
+  _fileQueue: [],
 };
 
 function defFormulas(){
@@ -671,10 +715,53 @@ function loadS(){
       if(!S.formulas||!S.formulas.length) S.formulas=defFormulas();
       if(!S.customF) S.customF=[];
       if(!S.overrides) S.overrides=[];
+      // Migration for new fields
+      if(!S.masterCols) S.masterCols=[
+        {key:'asin',label:'ASIN',required:true},
+        {key:'sku',label:'SKU'},{key:'ean',label:'EAN'},{key:'name',label:'品名'}
+      ];
+      if(!S.parentChild) S.parentChild=[];
+      if(!S.parentOverrides) S.parentOverrides=[];
+      if(!S.parentFormulas) S.parentFormulas=[];
+      S._fileQueue=[];
     }
   }catch(e){}
 }
 function saveS(){try{localStorage.setItem(SK,JSON.stringify(S));}catch(e){}}
+
+// ── Helpers ─────────────────────────────────────────────────
+function buildChildToParentMap(){
+  const m={};
+  S.parentChild.forEach(pc=>{(pc.children||[]).forEach(c=>{m[c]=pc.parent;});});
+  return m;
+}
+function buildParentToChildrenMap(){
+  const m={};
+  S.parentChild.forEach(pc=>{m[pc.parent]=[...(pc.children||[])];});
+  return m;
+}
+
+// ── BroadcastChannel ────────────────────────────────────────
+const BC_CHANNEL='replenishment_sync';
+let _bc=null;
+function initBC(){
+  try{
+    _bc=new BroadcastChannel(BC_CHANNEL);
+    _bc.onmessage=ev=>{
+      if(ev.data.type==='masterUpdate'){
+        S.master=ev.data.master;S.masterCols=ev.data.masterCols;
+        saveS();if(curTab===0)renderMaster();
+      }else if(ev.data.type==='pcUpdate'){
+        S.parentChild=ev.data.parentChild;
+        saveS();if(curTab===0)renderPC();
+      }
+    };
+  }catch(e){}
+}
+function broadcastMaster(){try{_bc&&_bc.postMessage({type:'masterUpdate',master:S.master,masterCols:S.masterCols});}catch(e){}}
+function broadcastPC(){try{_bc&&_bc.postMessage({type:'pcUpdate',parentChild:S.parentChild});}catch(e){}}
+function openMasterNewWin(){window.open(location.href,'masterWin','width=900,height=600');}
+function openPCNewWin(){window.open(location.href,'pcWin','width=900,height=600');}
 
 // ── Toast ──────────────────────────────────────────────────
 function toast(msg,type='ok'){
@@ -694,10 +781,10 @@ function gotoTab(i){
   document.querySelectorAll('.tab').forEach((t,j)=>t.classList.toggle('active',i===j));
   document.querySelectorAll('.pane').forEach((p,j)=>p.classList.toggle('active',i===j));
   curTab=i;
-  if(i===0)renderMaster();
+  if(i===0){renderMaster();renderPC();}
   if(i===1)renderSources();
   if(i===2)renderParams();
-  if(i===3)renderFormulas();
+  if(i===3){renderFormulas();renderParentFormulas();}
   if(i===4)renderResults();
 }
 
@@ -770,26 +857,102 @@ function renderMaster(){
   const t=document.getElementById('masterTbl');
   if(!S.master.length){t.style.display='none';e.style.display='block';updHdr();return;}
   t.style.display='';e.style.display='none';
+  // Dynamic header
+  document.getElementById('masterHead').innerHTML='<th style="width:38px">#</th>'+
+    S.masterCols.map(c=>`<th>${esc(c.label)}${!c.required?`<span class="del-col" onclick="delMasterCol('${c.key}')" title="删除列">×</span>`:''}</th>`).join('')+
+    '<th style="width:70px">操作</th>';
   b.innerHTML=S.master.map((r,i)=>`
     <tr>
       <td style="color:#9ca3af">${i+1}</td>
-      <td><input class="form-control form-control-sm" style="min-width:130px" value="${esc(r.asin||'')}" onchange="upMaster(${i},'asin',this.value)"></td>
-      <td><input class="form-control form-control-sm" style="min-width:120px" value="${esc(r.sku||'')}" onchange="upMaster(${i},'sku',this.value)"></td>
-      <td><input class="form-control form-control-sm" style="min-width:130px" value="${esc(r.ean||'')}" onchange="upMaster(${i},'ean',this.value)"></td>
-      <td><input class="form-control form-control-sm" style="min-width:160px" value="${esc(r.name||'')}" onchange="upMaster(${i},'name',this.value)"></td>
+      ${S.masterCols.map(c=>`<td><input class="form-control form-control-sm" style="min-width:${c.key==='name'?160:120}px" value="${esc(r[c.key]||'')}" onchange="upMaster(${i},'${c.key}',this.value)"></td>`).join('')}
       <td><button class="btn btn-danger btn-xs" onclick="delMaster(${i})">删除</button></td>
     </tr>`).join('');
   updHdr();
 }
-function addMaster(){S.master.push({asin:'',sku:'',ean:'',name:''});saveS();renderMaster();}
-function upMaster(i,f,v){S.master[i][f]=v;saveS();}
-function delMaster(i){S.master.splice(i,1);saveS();renderMaster();}
-function clearMaster(){if(!confirm('确定清空所有基础数据？'))return;S.master=[];saveS();renderMaster();toast('已清空','warn');}
+function addMaster(){const row={};S.masterCols.forEach(c=>row[c.key]='');S.master.push(row);saveS();renderMaster();broadcastMaster();}
+function upMaster(i,f,v){S.master[i][f]=v;saveS();broadcastMaster();}
+function delMaster(i){S.master.splice(i,1);saveS();renderMaster();broadcastMaster();}
+function clearMaster(){if(!confirm('确定清空所有基础数据？'))return;S.master=[];saveS();renderMaster();broadcastMaster();toast('已清空','warn');}
+function addMasterCol(){
+  const key=prompt('输入列键名（英文字母开头）：');
+  if(!key||!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)){if(key!==null)toast('键名无效','err');return;}
+  if(S.masterCols.find(c=>c.key===key)){toast('列已存在','err');return;}
+  const label=prompt('输入列显示名称：')||key;
+  S.masterCols.push({key,label});saveS();renderMaster();broadcastMaster();
+}
+function delMasterCol(key){
+  const col=S.masterCols.find(c=>c.key===key);
+  if(!confirm('确定删除列"'+(col?col.label:key)+'"？'))return;
+  S.masterCols=S.masterCols.filter(c=>c.key!==key);
+  S.master.forEach(r=>delete r[key]);
+  saveS();renderMaster();broadcastMaster();
+}
 function exportMasterTpl(){
-  const d=[['ASIN','SKU','EAN','品名'],...S.master.map(r=>[r.asin,r.sku,r.ean,r.name])];
+  const d=[S.masterCols.map(c=>c.label),...S.master.map(r=>S.masterCols.map(c=>r[c.key]||''))];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(d),'基础数据');
   XLSX.writeFile(wb,'基础数据模板.xlsx');toast('模板已导出');
+}
+
+// ── Parent-Child management ─────────────────────────────────
+function renderPC(){
+  const b=document.getElementById('pcBody');
+  const e=document.getElementById('pcEmpty');
+  if(!S.parentChild.length){b.innerHTML='';e.style.display='block';return;}
+  e.style.display='none';
+  b.innerHTML=S.parentChild.map((pc,i)=>`<tr>
+    <td><input class="form-control form-control-sm" style="min-width:130px" value="${esc(pc.parent||'')}" onchange="upPC(${i},this.value)" placeholder="父ASIN"></td>
+    <td>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+        ${(pc.children||[]).map((c,j)=>`<span class="child-badge">${esc(c)}<span class="del-child" onclick="delPCChild(${i},${j})">×</span></span>`).join('')}
+        <input class="form-control form-control-sm" style="width:140px" placeholder="输入子ASIN回车" onkeydown="addPCChild(event,${i})">
+      </div>
+    </td>
+    <td><button class="btn btn-danger btn-xs" onclick="delPC(${i})">删除</button></td>
+  </tr>`).join('');
+}
+function addPC(){S.parentChild.push({parent:'',children:[]});saveS();renderPC();broadcastPC();}
+function upPC(i,v){S.parentChild[i].parent=v;saveS();broadcastPC();}
+function delPC(i){S.parentChild.splice(i,1);saveS();renderPC();broadcastPC();}
+function delPCChild(pi,ci){S.parentChild[pi].children.splice(ci,1);saveS();renderPC();broadcastPC();}
+function addPCChild(ev,pi){
+  if(ev.key!=='Enter')return;ev.preventDefault();
+  const v=ev.target.value.trim();if(!v)return;
+  if(!S.parentChild[pi].children)S.parentChild[pi].children=[];
+  if(!S.parentChild[pi].children.includes(v)){S.parentChild[pi].children.push(v);saveS();renderPC();broadcastPC();}
+  ev.target.value='';
+}
+function openPCImport(){
+  const inp=document.createElement('input');inp.type='file';inp.accept='.xlsx,.xls,.csv';
+  inp.onchange=e=>{
+    const f=e.target.files[0];if(!f)return;
+    const rd=new FileReader();
+    rd.onload=ev=>{
+      try{
+        const wb=XLSX.read(ev.target.result,{type:'binary'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        if(data.length<2){toast('数据不足','err');return;}
+        const hdrs=data[0].map(h=>String(h||'').toLowerCase().trim());
+        let pi=hdrs.findIndex(h=>h.includes('父')||h.includes('parent'));
+        let ci=hdrs.findIndex(h=>h.includes('子')||h.includes('child'));
+        if(pi<0)pi=0;if(ci<0)ci=1;
+        const map={};
+        data.slice(1).forEach(r=>{
+          const p=String(r[pi]||'').trim(),c=String(r[ci]||'').trim();
+          if(!p||!c)return;if(!map[p])map[p]=[];if(!map[p].includes(c))map[p].push(c);
+        });
+        Object.entries(map).forEach(([parent,children])=>{
+          const existing=S.parentChild.find(pc=>pc.parent===parent);
+          if(existing){children.forEach(c=>{if(!existing.children.includes(c))existing.children.push(c);});}
+          else S.parentChild.push({parent,children});
+        });
+        saveS();renderPC();broadcastPC();toast(`导入 ${Object.keys(map).length} 组父子关系`);
+      }catch(er){toast('解析失败：'+er.message,'err');}
+    };
+    rd.readAsBinaryString(f);
+  };
+  inp.click();
 }
 
 // Master import (Excel)
@@ -815,23 +978,28 @@ function onMasterFile(ev){
       if(data.length<2){toast('文件数据不足','err');return;}
       const hdrs=data[0].map(h=>String(h||'').trim());
       S._pending={data,hdrs,type:'master'};
-      // Preview
       const prev=data.slice(0,4);
       document.getElementById('mImportContent').innerHTML=`
         <div class="alert alert-success">✅ 读取成功：${f.name}（共 ${data.length-1} 行）</div>
         <div class="tbl-wrap" style="max-height:120px"><table style="font-size:11px">
           ${prev.map((r,ri)=>`<tr>${r.map(c=>`<${ri?'td':'th'} style="padding:3px 6px;border:1px solid #eee">${esc(String(c||''))}</${ri?'td':'th'}>`).join('')}</tr>`).join('')}
         </table></div>`;
-      // Populate selects
-      ['mMapAsin','mMapSku','mMapEan','mMapName'].forEach(id=>{
-        const s=document.getElementById(id);
-        const def=s.options[0].outerHTML;
-        s.innerHTML=def+hdrs.map(h=>`<option value="${esc(h)}">${esc(h)}</option>`).join('');
+      // Dynamic column mapping based on masterCols
+      const defAliases={asin:['asin','ASIN'],sku:['sku','SKU'],ean:['ean','EAN','barcode','条码'],name:['品名','产品名','名称','name','title','产品名称']};
+      document.getElementById('mColMap').innerHTML=`<hr>
+        <h4 style="margin-bottom:10px;font-size:14px">列名映射</h4>
+        <div class="grid-2">${S.masterCols.map(c=>`
+          <div class="form-group"><label class="form-label">${esc(c.label)} 列${c.required?' <span class="tag-required">必填</span>':''}</label>
+          <select id="mMap_${c.key}" class="form-control"><option value="">${c.required?'-- 请选择 --':'-- 不映射 --'}</option>
+          ${hdrs.map(h=>`<option value="${esc(h)}">${esc(h)}</option>`).join('')}</select></div>`).join('')}
+        </div>
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="mMerge" checked> 与现有数据合并（不勾选则覆盖）
+        </label>`;
+      S.masterCols.forEach(c=>{
+        const sel=document.getElementById('mMap_'+c.key);
+        if(sel){const als=defAliases[c.key]||[c.key,c.label];sel.value=autoCol(hdrs,als)||'';}
       });
-      document.getElementById('mMapAsin').value=autoCol(hdrs,['asin','ASIN'])||hdrs[0]||'';
-      document.getElementById('mMapSku').value=autoCol(hdrs,['sku','SKU'])||'';
-      document.getElementById('mMapEan').value=autoCol(hdrs,['ean','EAN','barcode','条码'])||'';
-      document.getElementById('mMapName').value=autoCol(hdrs,['品名','产品名','名称','name','title','产品名称'])||'';
       document.getElementById('mColMap').style.display='block';
       document.getElementById('mImportBtn').style.display='inline-flex';
     }catch(er){toast('解析失败：'+er.message,'err');}
@@ -841,18 +1009,17 @@ function onMasterFile(ev){
 
 function confirmMasterImport(){
   const{data,hdrs}=S._pending;
-  const ac=document.getElementById('mMapAsin').value;
-  if(!ac){toast('请选择ASIN列','err');return;}
-  const sc=document.getElementById('mMapSku').value;
-  const ec=document.getElementById('mMapEan').value;
-  const nc=document.getElementById('mMapName').value;
+  const asinCol=document.getElementById('mMap_asin')?.value;
+  if(!asinCol){toast('请选择ASIN列','err');return;}
   const merge=document.getElementById('mMerge').checked;
   const rows=data.slice(1).map(r=>{
     const o={};hdrs.forEach((h,i)=>o[h]=String(r[i]||'').trim());
-    return{asin:o[ac]||'',sku:sc?o[sc]||'':'',ean:ec?o[ec]||'':'',name:nc?o[nc]||'':''};
+    const row={};
+    S.masterCols.forEach(c=>{const sel=document.getElementById('mMap_'+c.key);row[c.key]=sel&&sel.value?o[sel.value]||'':'';});
+    return row;
   }).filter(r=>r.asin);
   mergeMaster(rows,merge);
-  closeOv('mImportOv');renderMaster();toast(`导入 ${rows.length} 条`);
+  closeOv('mImportOv');renderMaster();broadcastMaster();toast(`导入 ${rows.length} 条`);
 }
 
 function mergeMaster(rows,merge){
@@ -883,17 +1050,20 @@ function confirmMasterPaste(){
   const hdrs=rows[0].map(h=>String(h||'').trim());
   const ai=hdrs.findIndex(h=>h.toLowerCase().includes('asin'));
   if(ai<0){toast('未找到 ASIN 列','err');return;}
-  const si=hdrs.findIndex(h=>h.toLowerCase().includes('sku'));
-  const ei=hdrs.findIndex(h=>/ean|barcode|条码/.test(h.toLowerCase()));
-  const ni=hdrs.findIndex(h=>/品名|产品名|名称|name|title/.test(h.toLowerCase()));
-  const newRows=rows.slice(1).map(r=>({
-    asin:String(r[ai]||'').trim(),
-    sku:si>=0?String(r[si]||'').trim():'',
-    ean:ei>=0?String(r[ei]||'').trim():'',
-    name:ni>=0?String(r[ni]||'').trim():'',
-  })).filter(r=>r.asin);
+  const defAliases={asin:['asin'],sku:['sku'],ean:['ean','barcode','条码'],name:['品名','产品名','名称','name','title']};
+  const colMap={};
+  S.masterCols.forEach(c=>{
+    const als=defAliases[c.key]||[c.key,c.label];
+    const idx=hdrs.findIndex(h=>{const lh=h.toLowerCase();return als.some(a=>lh.includes(a.toLowerCase()));});
+    if(idx>=0)colMap[c.key]=idx;
+  });
+  const newRows=rows.slice(1).map(r=>{
+    const row={};
+    S.masterCols.forEach(c=>{row[c.key]=colMap[c.key]!==undefined?String(r[colMap[c.key]]||'').trim():'';});
+    return row;
+  }).filter(r=>r.asin);
   mergeMaster(newRows,true);
-  closeOv('mPasteOv');renderMaster();toast(`导入 ${newRows.length} 条`);
+  closeOv('mPasteOv');renderMaster();broadcastMaster();toast(`导入 ${newRows.length} 条`);
 }
 
 // ======================================================================
@@ -918,11 +1088,25 @@ function processFile(f){
       const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
       if(data.length<2){toast(`${f.name}：数据不足`,'err');return;}
       const hdrs=data[0].map(h=>String(h||'').trim());
-      S._pending={f,data,hdrs};
-      showColMapModal(f.name,hdrs);
+      S._fileQueue.push({f,data,hdrs});
+      if(S._fileQueue.length===1) processNextFile();
     }catch(er){toast(`${f.name}：${er.message}`,'err');}
   };
   rd.readAsBinaryString(f);
+}
+
+function processNextFile(){
+  if(!S._fileQueue.length)return;
+  const item=S._fileQueue[0];
+  S._pending=item;
+  showColMapModal(item.f.name,item.hdrs);
+}
+
+function cancelColMap(){
+  closeOv('colMapOv');
+  S._fileQueue.shift();
+  S._pending=null;
+  if(S._fileQueue.length) setTimeout(processNextFile,200);
 }
 
 function showColMapModal(name,hdrs){
@@ -960,6 +1144,10 @@ function confirmColMap(){
   });
   S.sources.push({id:'s'+Date.now(),name:f.name,fields:Object.keys(mapping),data:src,rowCount:Object.keys(src).length});
   saveS();closeOv('colMapOv');renderSources();toast(`已导入 ${Object.keys(src).length} 条`);
+  // Process next file in queue
+  S._fileQueue.shift();
+  S._pending=null;
+  if(S._fileQueue.length) setTimeout(processNextFile,200);
 }
 
 function renderSources(){
@@ -1007,13 +1195,15 @@ function renderMergePreview(){
   document.getElementById('mergeCard').style.display='block';
   document.getElementById('mergeCount').textContent=`共 ${asins.length} 条记录`;
   const fkeys=Object.keys(FIELDS);
-  document.getElementById('mergeTblH').innerHTML=`<tr><th>ASIN</th>${fkeys.map(k=>`<th>${FIELDS[k].label}</th>`).join('')}</tr>`;
+  const c2p=buildChildToParentMap();
+  document.getElementById('mergeTblH').innerHTML=`<tr><th>ASIN</th><th>父ASIN</th>${fkeys.map(k=>`<th>${FIELDS[k].label}</th>`).join('')}</tr>`;
   document.getElementById('mergeTblB').innerHTML=asins.slice(0,80).map(a=>`
     <tr>
       <td style="font-family:monospace">${esc(a)}</td>
+      <td style="font-family:monospace;color:#6b7280">${esc(c2p[a]||'-')}</td>
       ${fkeys.map(k=>`<td>${m[a][k]!==undefined?m[a][k]:'-'}</td>`).join('')}
     </tr>`).join('')
-    +(asins.length>80?`<tr><td colspan="${fkeys.length+1}" style="text-align:center;color:#9ca3af;font-style:italic">仅显示前80条，共 ${asins.length} 条</td></tr>`:'');
+    +(asins.length>80?`<tr><td colspan="${fkeys.length+2}" style="text-align:center;color:#9ca3af;font-style:italic">仅显示前80条，共 ${asins.length} 条</td></tr>`:'');
 }
 
 // Data paste
@@ -1075,7 +1265,7 @@ function renderParams(){
   document.getElementById('pPrepare').value=p.prepare;
   document.getElementById('pMinAvail').value=p.minAvail;
   document.getElementById('pProd').value=p.prodDays;
-  chkWeights();renderOverrides();
+  chkWeights();renderOverrides();renderParentOverrides();
 }
 function chkWeights(){
   const t=+document.getElementById('w7').value+(+document.getElementById('w14').value)+(+document.getElementById('w30').value);
@@ -1113,6 +1303,25 @@ function renderOverrides(){
 }
 function upOv(i,f,v){S.overrides[i][f]=v;saveS();}
 function delOv(i){S.overrides.splice(i,1);saveS();renderOverrides();}
+
+// ── Parent ASIN Override ────────────────────────────────────
+function addParentOverride(){
+  S.parentOverrides.push({parentAsin:'',transport:'',prepare:'',minAvail:'',prodDays:'',wCoeff:'',promo:''});
+  saveS();renderParentOverrides();
+}
+function renderParentOverrides(){
+  const b=document.getElementById('parentOverrideBody');
+  const e=document.getElementById('parentOverrideEmpty');
+  if(!S.parentOverrides.length){b.innerHTML='';e.style.display='block';return;}
+  e.style.display='none';
+  b.innerHTML=S.parentOverrides.map((o,i)=>`<tr>
+    <td><input class="form-control form-control-sm" style="min-width:130px" value="${esc(o.parentAsin||'')}" onchange="upParentOv(${i},'parentAsin',this.value)" placeholder="父ASIN"></td>
+    ${['transport','prepare','minAvail','prodDays','wCoeff','promo'].map(f=>`<td><input type="number" class="form-control form-control-sm" style="width:80px" value="${o[f]||''}" onchange="upParentOv(${i},'${f}',this.value)" placeholder="默认"></td>`).join('')}
+    <td><button class="btn btn-danger btn-xs" onclick="delParentOv(${i})">删除</button></td>
+  </tr>`).join('');
+}
+function upParentOv(i,f,v){S.parentOverrides[i][f]=v;saveS();}
+function delParentOv(i){S.parentOverrides.splice(i,1);saveS();renderParentOverrides();}
 
 // ======================================================================
 // TAB 3 – FORMULAS
@@ -1164,6 +1373,81 @@ function addCustomF(){
 function delCustomF(i){S.customF.splice(i,1);saveS();renderFormulas();}
 function cpVar(v){navigator.clipboard?.writeText(v).then(()=>toast('已复制：'+v));}
 
+// ── Parent ASIN Formula Override ────────────────────────────
+function addParentFormula(){
+  const asin=prompt('输入父ASIN：');
+  if(!asin)return;
+  if(S.parentFormulas.find(pf=>pf.parentAsin===asin)){toast('该父ASIN已有公式配置','err');return;}
+  S.parentFormulas.push({
+    parentAsin:asin,
+    formulas:JSON.parse(JSON.stringify(S.formulas)),
+    customF:JSON.parse(JSON.stringify(S.customF))
+  });
+  saveS();renderParentFormulas();
+}
+function renderParentFormulas(){
+  const c=document.getElementById('parentFormulaList');
+  if(!c)return;
+  if(!S.parentFormulas.length){c.innerHTML='<div style="text-align:center;padding:16px;color:#9ca3af;font-size:13px">暂无父ASIN公式覆盖</div>';return;}
+  c.innerHTML=S.parentFormulas.map((pf,pi)=>{
+    const all=[...pf.formulas,...pf.customF];
+    return `<div class="card" style="margin-bottom:10px;border:1px solid #dbeafe">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="collapse-toggle" onclick="togglePF(${pi})" id="pfToggle_${pi}">▶</span>
+          <strong style="color:#1e40af">父ASIN：${esc(pf.parentAsin)}</strong>
+          <span class="badge badge-blue">${all.length} 个公式</span>
+        </div>
+        <button class="btn btn-danger btn-xs" onclick="delParentFormula(${pi})">删除</button>
+      </div>
+      <div id="pfBody_${pi}" style="display:none">
+        ${all.map((f,fi)=>`
+          <div style="margin-bottom:8px;padding:8px;background:#f8fbff;border-radius:6px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin:0">
+                <input type="checkbox" ${f.on?'checked':''} onchange="togglePFFormula(${pi},${fi},this.checked)">
+                <strong style="font-size:13px">${esc(f.label)}</strong>
+              </label>
+              <code style="font-size:11px;color:#9ca3af">${esc(f.name)}</code>
+            </div>
+            <textarea class="form-control" rows="2" id="pfexpr_${pi}_${fi}" style="font-size:12px">${esc(f.expr)}</textarea>
+          </div>`).join('')}
+        <div style="margin-top:8px">
+          <button class="btn btn-success btn-sm" onclick="savePFFormulas(${pi})">💾 保存此组公式</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function togglePF(pi){
+  const el=document.getElementById('pfBody_'+pi);
+  const tog=document.getElementById('pfToggle_'+pi);
+  if(el.style.display==='none'){el.style.display='block';tog.textContent='▼';}
+  else{el.style.display='none';tog.textContent='▶';}
+}
+function togglePFFormula(pi,fi,v){
+  const pf=S.parentFormulas[pi];
+  if(fi<pf.formulas.length)pf.formulas[fi].on=v;
+  else pf.customF[fi-pf.formulas.length].on=v;
+  saveS();
+}
+function savePFFormulas(pi){
+  const pf=S.parentFormulas[pi];
+  const all=[...pf.formulas,...pf.customF];
+  all.forEach((f,fi)=>{
+    const el=document.getElementById('pfexpr_'+pi+'_'+fi);
+    if(el){
+      if(fi<pf.formulas.length)pf.formulas[fi].expr=el.value;
+      else pf.customF[fi-pf.formulas.length].expr=el.value;
+    }
+  });
+  saveS();toast('父ASIN公式已保存');
+}
+function delParentFormula(pi){
+  if(!confirm('确定删除该父ASIN的公式配置？'))return;
+  S.parentFormulas.splice(pi,1);saveS();renderParentFormulas();
+}
+
 function testFormulas(){
   saveFormulas();
   const testData={sales7:70,sales14:140,sales30:270,vcOnSale:100,vcInTransit:50,overseasWarehouse:30,seaFreightInTransit:200,domesticInventory:500,inProduction:1000,promotionSales:50};
@@ -1184,7 +1468,7 @@ function testFormulas(){
 // ======================================================================
 // CALCULATION ENGINE
 // ======================================================================
-function calcForAsin(data,gp,ov){
+function calcForAsin(data,gp,ov,optFormulas,optCustomF){
   const p={...gp,...ov};
   const ctx={
     ...data,
@@ -1199,7 +1483,9 @@ function calcForAsin(data,gp,ov){
     Math,
   };
   Object.keys(FIELDS).forEach(k=>{if(ctx[k]===undefined)ctx[k]=0;});
-  const all=[...S.formulas,...S.customF].filter(f=>f.on);
+  const useFormulas=optFormulas||S.formulas;
+  const useCustomF=optCustomF||S.customF;
+  const all=[...useFormulas,...useCustomF].filter(f=>f.on);
   for(const f of all){
     try{
       // eslint-disable-next-line no-new-func
@@ -1215,7 +1501,7 @@ function calcForAsin(data,gp,ov){
 // TAB 4 – RESULTS
 // ======================================================================
 const RES_COLS=[
-  {k:'asin',l:'ASIN'},{k:'sku',l:'SKU'},{k:'ean',l:'EAN'},{k:'name',l:'品名'},
+  {k:'asin',l:'ASIN'},{k:'parentAsin',l:'父ASIN'},{k:'sku',l:'SKU'},{k:'ean',l:'EAN'},{k:'name',l:'品名'},
   {k:'replenishment',l:'补货数量'},{k:'production',l:'生产数量'},
   {k:'theoreticalShipment',l:'理论发货数量'},{k:'actualShipment',l:'实际发货数量'},
   {k:'sales7',l:'7天销量'},{k:'sales14',l:'14天销量'},{k:'sales30',l:'30天销量'},
@@ -1231,7 +1517,7 @@ let filteredRes=[];
 let sortKey='';
 let sortDir=1; // 1=升序 -1=降序
 
-const NO_SORT_COLS=new Set(['asin','sku','ean','name']);
+const NO_SORT_COLS=new Set(['asin','parentAsin','sku','ean','name']);
 
 function sortBy(k){
   if(sortKey===k)sortDir*=-1;
@@ -1243,20 +1529,34 @@ function runCalc(){
   if(!S.master.length&&!S.sources.length){toast('请先导入数据','err');return;}
   const merged=getMerged();
   const ovMap=Object.fromEntries(S.overrides.filter(o=>o.asin).map(o=>[o.asin,o]));
+  const parentOvMap=Object.fromEntries(S.parentOverrides.filter(o=>o.parentAsin).map(o=>[o.parentAsin,o]));
+  const parentFMap=Object.fromEntries(S.parentFormulas.filter(o=>o.parentAsin).map(o=>[o.parentAsin,o]));
+  const c2p=buildChildToParentMap();
   const allAsins=new Set(Object.keys(merged));
   S.results=[];
   allAsins.forEach(asin=>{
     if(!asin)return;
     const m=S.master.find(r=>r.asin===asin)||{};
     const d={...merged[asin]||{}};
+    const parentAsin=c2p[asin]||'';
+    // Parameter merge: child override > parent override > global
     const ov=ovMap[asin]||{};
+    const pov=parentAsin?parentOvMap[parentAsin]||{}:{};
     const ovParams={};
     ['transport','prepare','minAvail','prodDays','wCoeff'].forEach(f=>{
-      if(ov[f]!==''&&ov[f]!==undefined)ovParams[f]=+ov[f];
+      if(ov[f]!==''&&ov[f]!==undefined) ovParams[f]=+ov[f];
+      else if(pov[f]!==''&&pov[f]!==undefined) ovParams[f]=+pov[f];
     });
-    if(ov.promo!==''&&ov.promo!==undefined)d.promotionSales=+ov.promo;
-    const calc=calcForAsin(d,S.params,ovParams);
-    S.results.push({asin,sku:m.sku||'',ean:m.ean||'',name:m.name||'',...calc});
+    if(ov.promo!==''&&ov.promo!==undefined) d.promotionSales=+ov.promo;
+    else if(pov.promo!==''&&pov.promo!==undefined) d.promotionSales=+pov.promo;
+    // Formula selection: parent formula > global
+    let useFormulas=null, useCustomF=null;
+    if(parentAsin && parentFMap[parentAsin]){
+      useFormulas=parentFMap[parentAsin].formulas;
+      useCustomF=parentFMap[parentAsin].customF;
+    }
+    const calc=calcForAsin(d,S.params,ovParams,useFormulas,useCustomF);
+    S.results.push({asin,sku:m.sku||'',ean:m.ean||'',name:m.name||'',parentAsin,...calc});
   });
   saveS();renderResults();toast(`计算完成，共 ${S.results.length} 条`);
 }
@@ -1288,7 +1588,7 @@ function applyFilter(){
     if(ft==='pos'&&!(r.replenishment>0))return false;
     if(ft==='neg'&&!(r.replenishment<=0))return false;
     if(fs){
-      const m=[r.asin,r.sku,r.name].some(v=>String(v||'').toLowerCase().includes(fs));
+      const m=[r.asin,r.sku,r.name,r.parentAsin].some(v=>String(v||'').toLowerCase().includes(fs));
       if(!m)return false;
     }
     return true;
@@ -1354,7 +1654,8 @@ function doExport(type){
 // CONFIG EXPORT / IMPORT
 // ======================================================================
 function exportCfg(){
-  const cfg={params:S.params,formulas:S.formulas,customF:S.customF,overrides:S.overrides,master:S.master};
+  const cfg={params:S.params,formulas:S.formulas,customF:S.customF,overrides:S.overrides,master:S.master,
+    masterCols:S.masterCols,parentChild:S.parentChild,parentOverrides:S.parentOverrides,parentFormulas:S.parentFormulas};
   const url=URL.createObjectURL(new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'}));
   const a=document.createElement('a');a.href=url;a.download='补货工具配置_'+new Date().toLocaleDateString('zh-CN').replace(/\//g,'-')+'.json';a.click();
   URL.revokeObjectURL(url);toast('配置已导出');
@@ -1371,6 +1672,10 @@ function importCfg(ev){
       if(cfg.customF)S.customF=cfg.customF;
       if(cfg.overrides)S.overrides=cfg.overrides;
       if(cfg.master)S.master=cfg.master;
+      if(cfg.masterCols)S.masterCols=cfg.masterCols;
+      if(cfg.parentChild)S.parentChild=cfg.parentChild;
+      if(cfg.parentOverrides)S.parentOverrides=cfg.parentOverrides;
+      if(cfg.parentFormulas)S.parentFormulas=cfg.parentFormulas;
       saveS();gotoTab(curTab);toast('配置已导入');
     }catch(e){toast('解析失败：'+e.message,'err');}
   };
@@ -1634,7 +1939,7 @@ function enterApp(){
   document.getElementById('authScreen').classList.add('hidden');
   document.getElementById('appWrap').classList.add('visible');
   document.getElementById('hdrUser').textContent=AUTH_USER;
-  loadS(); renderMaster(); updHdr(); renderFormulas();
+  loadS(); renderMaster(); renderPC(); updHdr(); renderFormulas(); initBC();
 }
 
 // 页面加载时检查是否已登录

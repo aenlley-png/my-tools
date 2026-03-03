@@ -1,0 +1,18 @@
+name = "stock-monitor"
+main = "stock-worker.js"
+compatibility_date = "2024-12-01"
+
+# D1 数据库绑定
+[[d1_databases]]
+binding = "DB"
+database_name = "stock-monitor-db"
+database_id = "28898aa9-5c43-41dd-978d-02d2c9b52568"
+
+# KV 缓存绑定
+[[kv_namespaces]]
+binding = "CACHE"
+id = "b3c200f957dd466cbb81e2efd133b78d"
+
+# 定时触发器：每10分钟执行一次
+[triggers]
+crons = ["*/10 * * * *"]

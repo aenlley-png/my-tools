@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>股票监控系统</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  [x-cloak] { display: none !important; }
+  .tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; font-weight: 600; }
+  .toast { animation: slideIn 0.3s ease-out, fadeOut 0.5s ease-in 2.5s forwards; }
+  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+  .condition-group { transition: all 0.2s; }
+  .condition-group:hover { box-shadow: 0 0 0 1px rgba(59,130,246,0.3); }
+  .modal-overlay { background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); }
+  .btn { @apply px-3 py-1.5 rounded text-sm font-medium transition-colors; }
+  .btn-primary { @apply bg-blue-500 text-white hover:bg-blue-600; }
+  .btn-success { @apply bg-green-500 text-white hover:bg-green-600; }
+  .btn-danger { @apply bg-red-500 text-white hover:bg-red-600; }
+  .btn-secondary { @apply bg-gray-200 text-gray-700 hover:bg-gray-300; }
+  .input { @apply border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400; }
+  .select { @apply border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white; }
+  table { @apply w-full text-sm; }
+  th { @apply bg-gray-50 px-3 py-2 text-left font-medium text-gray-600 border-b; }
+  td { @apply px-3 py-2 border-b border-gray-100; }
+  tr:hover td { @apply bg-blue-50; }
+</style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<!-- Toast 容器 -->
+<div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+
+<!-- 顶部导航 -->
+<header class="bg-white shadow-sm border-b">
+  <div class="max-w-7xl mx-auto px-4">
+    <div class="flex items-center justify-between h-14">
+      <h1 class="text-lg font-bold text-gray-800">Stock Monitor</h1>
+      <div class="flex items-center gap-2">
+        <span id="api-status" class="text-xs text-gray-400">API: 未连接</span>
+        <button onclick="initDatabase()" class="btn btn-secondary text-xs">初始化DB</button>
+      </div>
+    </div>
+    <nav class="flex gap-0 -mb-px">
+      <button class="px-4 py-2 text-sm tab-active" data-tab="indicators" onclick="switchTab('indicators')">指标管理</button>
+      <button class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700" data-tab="strategies" onclick="switchTab('strategies')">策略配置</button>
+      <button class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700" data-tab="tasks" onclick="switchTab('tasks')">任务管理</button>
+      <button class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700" data-tab="results" onclick="switchTab('results')">结果展示</button>
+      <button class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700" data-tab="settings" onclick="switchTab('settings')">系统设置</button>
+    </nav>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 py-4">
+
+<!-- ═══════ Tab 1: 指标管理 ═══════ -->
+<section id="tab-indicators" class="tab-content">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-semibold">监控指标管理</h2>
+    <div class="flex gap-2">
+      <button onclick="showModal('indicator-modal')" class="btn btn-primary">+ 新增指标</button>
+      <label class="btn btn-secondary cursor-pointer">
+        批量导入
+        <input type="file" accept=".csv,.xlsx,.xls" class="hidden" onchange="importIndicators(event)">
+      </label>
+    </div>
+  </div>
+
+  <div class="mb-3 flex gap-2">
+    <select id="indicator-filter-category" class="select" onchange="renderIndicators()">
+      <option value="">全部分类</option>
+      <option value="valuation">估值</option>
+      <option value="profitability">盈利能力</option>
+      <option value="growth">成长性</option>
+      <option value="leverage">财务杠杆</option>
+      <option value="price">价格</option>
+    </select>
+    <input type="text" id="indicator-search" class="input flex-1" placeholder="搜索指标名称..." oninput="renderIndicators()">
+  </div>
+
+  <div class="bg-white rounded-lg shadow overflow-hidden">
+    <table>
+      <thead>
+        <tr>
+          <th>指标名称</th>
+          <th>英文名</th>
+          <th>分类</th>
+          <th>数据源</th>
+          <th>单位</th>
+          <th>类型</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="indicator-table-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ Tab 2: 策略配置 ═══════ -->
+<section id="tab-strategies" class="tab-content hidden">
+  <div class="flex gap-4 h-[calc(100vh-180px)]">
+    <!-- 左侧：策略列表 -->
+    <div class="w-64 flex-shrink-0 bg-white rounded-lg shadow p-3 flex flex-col">
+      <button onclick="createNewStrategy()" class="btn btn-primary w-full mb-3">+ 新建策略</button>
+      <div id="strategy-list" class="flex-1 overflow-y-auto space-y-1"></div>
+    </div>
+
+    <!-- 右侧：策略编辑器 -->
+    <div class="flex-1 bg-white rounded-lg shadow p-4 flex flex-col overflow-y-auto">
+      <div id="strategy-editor-placeholder" class="flex items-center justify-center h-full text-gray-400">
+        选择一个策略或创建新策略
+      </div>
+      <div id="strategy-editor" class="hidden flex flex-col h-full">
+        <div class="flex gap-3 mb-4">
+          <input type="text" id="strategy-name" class="input flex-1" placeholder="策略名称">
+          <input type="text" id="strategy-desc" class="input flex-1" placeholder="策略描述（可选）">
+          <button onclick="saveCurrentStrategy()" class="btn btn-success">保存</button>
+          <button onclick="deleteCurrentStrategy()" class="btn btn-danger">删除</button>
+        </div>
+
+        <!-- 条件树构建器 -->
+        <div class="mb-3 text-sm font-medium text-gray-600">条件配置：</div>
+        <div id="condition-tree-container" class="flex-1 overflow-y-auto border rounded p-3 bg-gray-50 mb-3"></div>
+
+        <!-- 预览 -->
+        <div class="bg-blue-50 border border-blue-200 rounded p-3">
+          <div class="text-xs font-medium text-blue-600 mb-1">策略预览：</div>
+          <div id="strategy-preview" class="text-sm text-blue-800 break-all"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ Tab 3: 任务管理 ═══════ -->
+<section id="tab-tasks" class="tab-content hidden">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-semibold">监控任务</h2>
+    <button onclick="showModal('task-modal')" class="btn btn-primary">+ 创建任务</button>
+  </div>
+
+  <div class="bg-white rounded-lg shadow overflow-hidden">
+    <table>
+      <thead>
+        <tr>
+          <th>任务名称</th>
+          <th>市场</th>
+          <th>范围</th>
+          <th>策略</th>
+          <th>频率</th>
+          <th>时间窗口</th>
+          <th>状态</th>
+          <th>最后运行</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="task-table-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ Tab 4: 结果展示 ═══════ -->
+<section id="tab-results" class="tab-content hidden">
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex gap-2 items-center">
+      <select id="result-filter-task" class="select" onchange="loadResults()">
+        <option value="">全部任务</option>
+      </select>
+      <select id="result-filter-group" class="select" onchange="loadResults()">
+        <option value="">全部分组</option>
+      </select>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="showModal('display-config-modal')" class="btn btn-secondary">列配置</button>
+      <button onclick="showSaveGroupModal()" class="btn btn-secondary">保存为组</button>
+      <button onclick="exportResultsExcel()" class="btn btn-success">导出 Excel</button>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow overflow-hidden">
+    <table>
+      <thead>
+        <tr id="result-table-head"></tr>
+      </thead>
+      <tbody id="result-table-body"></tbody>
+    </table>
+  </div>
+
+  <div id="result-pagination" class="flex items-center justify-between mt-3 text-sm text-gray-500"></div>
+</section>
+
+<!-- ═══════ Tab 5: 系统设置 ═══════ -->
+<section id="tab-settings" class="tab-content hidden">
+  <div class="max-w-2xl space-y-6">
+    <div class="bg-white rounded-lg shadow p-6">
+      <h3 class="font-semibold mb-4">Worker API 配置</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-sm text-gray-600 mb-1">API 地址</label>
+          <div class="flex gap-2">
+            <input type="text" id="setting-api-url" class="input flex-1" placeholder="https://your-worker.workers.dev">
+            <button onclick="saveApiUrl()" class="btn btn-primary">保存</button>
+            <button onclick="testApiConnection()" class="btn btn-secondary">测试连接</button>
+          </div>
+          <p class="text-xs text-gray-400 mt-1">Cloudflare Worker 的部署地址</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6">
+      <h3 class="font-semibold mb-4">企业微信通知</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-sm text-gray-600 mb-1">全局 Webhook URL</label>
+          <div class="flex gap-2">
+            <input type="text" id="setting-wechat-url" class="input flex-1" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...">
+            <button onclick="saveWeChatUrl()" class="btn btn-primary">保存</button>
+            <button onclick="testWeChatNotify()" class="btn btn-secondary">测试</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6">
+      <h3 class="font-semibold mb-4">数据库管理</h3>
+      <div class="flex gap-2">
+        <button onclick="initDatabase()" class="btn btn-primary">初始化数据库</button>
+        <button onclick="clearAllCache()" class="btn btn-danger">清除缓存</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ═══════ 弹窗：新增指标 ═══════ -->
+<div id="indicator-modal" class="fixed inset-0 z-40 hidden">
+  <div class="modal-overlay absolute inset-0" onclick="hideModal('indicator-modal')"></div>
+  <div class="relative z-10 bg-white rounded-lg shadow-xl max-w-md mx-auto mt-20 p-6">
+    <h3 class="font-semibold mb-4">新增指标</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">指标名称 *</label>
+        <input type="text" id="new-indicator-name" class="input w-full" placeholder="如：市盈率(动)">
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">英文名</label>
+        <input type="text" id="new-indicator-name-en" class="input w-full" placeholder="如：PE_TTM">
+      </div>
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="block text-sm text-gray-600 mb-1">分类</label>
+          <select id="new-indicator-category" class="select w-full">
+            <option value="valuation">估值</option>
+            <option value="profitability">盈利能力</option>
+            <option value="growth">成长性</option>
+            <option value="leverage">财务杠杆</option>
+            <option value="price">价格</option>
+            <option value="other">其他</option>
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="block text-sm text-gray-600 mb-1">单位</label>
+          <input type="text" id="new-indicator-unit" class="input w-full" placeholder="如：%、倍、亿">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">数据源</label>
+        <select id="new-indicator-source" class="select w-full">
+          <option value="manual">手动/自定义</option>
+          <option value="eastmoney_realtime">东方财富-实时</option>
+          <option value="eastmoney_report">东方财富-年报</option>
+          <option value="yahoo_statistics">Yahoo Finance</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">数据源字段映射</label>
+        <input type="text" id="new-indicator-field" class="input w-full" placeholder="如：f9, WEIGHTAVG_ROE, trailingPE">
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">描述</label>
+        <input type="text" id="new-indicator-desc" class="input w-full" placeholder="可选描述">
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-4">
+      <button onclick="hideModal('indicator-modal')" class="btn btn-secondary">取消</button>
+      <button onclick="addIndicator()" class="btn btn-primary">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ 弹窗：创建任务 ═══════ -->
+<div id="task-modal" class="fixed inset-0 z-40 hidden">
+  <div class="modal-overlay absolute inset-0" onclick="hideModal('task-modal')"></div>
+  <div class="relative z-10 bg-white rounded-lg shadow-xl max-w-lg mx-auto mt-10 p-6 max-h-[80vh] overflow-y-auto">
+    <h3 class="font-semibold mb-4">创建监控任务</h3>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">任务名称 *</label>
+        <input type="text" id="new-task-name" class="input w-full" placeholder="如：A股价值股筛选">
+      </div>
+
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">市场 *</label>
+        <div class="flex gap-3">
+          <label class="flex items-center gap-1"><input type="radio" name="task-market" value="A" checked> A股</label>
+          <label class="flex items-center gap-1"><input type="radio" name="task-market" value="US"> 美股</label>
+          <label class="flex items-center gap-1"><input type="radio" name="task-market" value="HK"> 港股</label>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">股票范围</label>
+        <div class="flex gap-3 mb-2">
+          <label class="flex items-center gap-1"><input type="radio" name="task-scope" value="all" checked onchange="toggleStockCodes()"> 所有股票</label>
+          <label class="flex items-center gap-1"><input type="radio" name="task-scope" value="specific" onchange="toggleStockCodes()"> 特定股票</label>
+        </div>
+        <div id="stock-codes-input" class="hidden">
+          <textarea id="new-task-codes" class="input w-full h-20" placeholder="输入股票代码，每行一个或逗号分隔&#10;如：600519,000858,601318"></textarea>
+          <label class="text-xs text-blue-500 cursor-pointer mt-1 inline-block">
+            <input type="file" accept=".csv,.xlsx,.xls" class="hidden" onchange="importStockCodes(event)">
+            从文件导入
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">策略 *</label>
+        <select id="new-task-strategy" class="select w-full">
+          <option value="">选择策略</option>
+        </select>
+      </div>
+
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="block text-sm text-gray-600 mb-1">监控频率</label>
+          <select id="new-task-frequency" class="select w-full">
+            <option value="10">10分钟</option>
+            <option value="30">30分钟</option>
+            <option value="60">1小时</option>
+            <option value="240">4小时</option>
+            <option value="1440">每天</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="block text-sm text-gray-600 mb-1">每日开始时间</label>
+          <input type="time" id="new-task-start-time" class="input w-full" value="09:00">
+        </div>
+        <div class="flex-1">
+          <label class="block text-sm text-gray-600 mb-1">每日结束时间</label>
+          <input type="time" id="new-task-end-time" class="input w-full" value="16:00">
+        </div>
+      </div>
+
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="block text-sm text-gray-600 mb-1">开始日期</label>
+          <input type="date" id="new-task-date-start" class="input w-full">
+        </div>
+        <div class="flex-1">
+          <label class="block text-sm text-gray-600 mb-1">结束日期</label>
+          <input type="date" id="new-task-date-end" class="input w-full">
+        </div>
+      </div>
+
+      <div>
+        <label class="flex items-center gap-2">
+          <input type="checkbox" id="new-task-notify">
+          <span class="text-sm text-gray-600">启用企业微信通知</span>
+        </label>
+        <input type="text" id="new-task-webhook" class="input w-full mt-2" placeholder="Webhook URL（留空则使用全局配置）">
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-2 mt-4">
+      <button onclick="hideModal('task-modal')" class="btn btn-secondary">取消</button>
+      <button onclick="addTask()" class="btn btn-primary">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ 弹窗：展示列配置 ═══════ -->
+<div id="display-config-modal" class="fixed inset-0 z-40 hidden">
+  <div class="modal-overlay absolute inset-0" onclick="hideModal('display-config-modal')"></div>
+  <div class="relative z-10 bg-white rounded-lg shadow-xl max-w-md mx-auto mt-20 p-6">
+    <h3 class="font-semibold mb-4">配置展示列</h3>
+    <div id="display-config-list" class="space-y-2 max-h-60 overflow-y-auto"></div>
+    <div class="flex justify-end gap-2 mt-4">
+      <button onclick="hideModal('display-config-modal')" class="btn btn-secondary">取消</button>
+      <button onclick="saveDisplayColumns()" class="btn btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ 弹窗：保存为组 ═══════ -->
+<div id="save-group-modal" class="fixed inset-0 z-40 hidden">
+  <div class="modal-overlay absolute inset-0" onclick="hideModal('save-group-modal')"></div>
+  <div class="relative z-10 bg-white rounded-lg shadow-xl max-w-sm mx-auto mt-20 p-6">
+    <h3 class="font-semibold mb-4">保存为分组</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">组名 *</label>
+        <input type="text" id="new-group-name" class="input w-full" placeholder="如：优质价值股">
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">描述</label>
+        <input type="text" id="new-group-desc" class="input w-full" placeholder="可选">
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-4">
+      <button onclick="hideModal('save-group-modal')" class="btn btn-secondary">取消</button>
+      <button onclick="saveResultGroup()" class="btn btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// 全局状态
+// ════════════════════════════════════════════════════════════
+
+const state = {
+  apiUrl: localStorage.getItem('stock_monitor_api_url') || '',
+  activeTab: 'indicators',
+  indicators: [],
+  strategies: [],
+  tasks: [],
+  results: [],
+  resultGroups: [],
+  displayColumns: ['股票代码', '股票名称', '当前股价', '市盈率(动)', '市净率', 'ROE(加权)', 'ROA', '资产负债率', '涨跌幅', '总市值'],
+  currentStrategyId: null,
+  currentConditionTree: { type: 'AND', children: [] },
+  resultPage: 1,
+  resultTotal: 0,
+};
+
+// ════════════════════════════════════════════════════════════
+// API 客户端
+// ════════════════════════════════════════════════════════════
+
+const api = {
+  async request(method, path, data) {
+    if (!state.apiUrl) { toast('请先在系统设置中配置 API 地址', 'error'); throw new Error('API未配置'); }
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (data) opts.body = JSON.stringify(data);
+    const resp = await fetch(state.apiUrl + path, opts);
+    const json = await resp.json();
+    if (!json.success && json.error) throw new Error(json.error);
+    return json;
+  },
+  get: (path) => api.request('GET', path),
+  post: (path, data) => api.request('POST', path, data),
+  put: (path, data) => api.request('PUT', path, data),
+  del: (path) => api.request('DELETE', path),
+};
+
+// ════════════════════════════════════════════════════════════
+// Toast 通知
+// ════════════════════════════════════════════════════════════
+
+function toast(msg, type = 'info') {
+  const colors = { info: 'bg-blue-500', success: 'bg-green-500', error: 'bg-red-500', warning: 'bg-yellow-500' };
+  const el = document.createElement('div');
+  el.className = `toast ${colors[type] || colors.info} text-white px-4 py-2 rounded shadow-lg text-sm`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+// ════════════════════════════════════════════════════════════
+// Tab 切换
+// ════════════════════════════════════════════════════════════
+
+function switchTab(tab) {
+  state.activeTab = tab;
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+  document.getElementById('tab-' + tab).classList.remove('hidden');
+  document.querySelectorAll('[data-tab]').forEach(btn => {
+    btn.classList.toggle('tab-active', btn.dataset.tab === tab);
+    btn.classList.toggle('text-gray-500', btn.dataset.tab !== tab);
+  });
+
+  // 加载对应数据
+  if (tab === 'indicators') loadIndicators();
+  if (tab === 'strategies') loadStrategies();
+  if (tab === 'tasks') loadTasks();
+  if (tab === 'results') loadResults();
+}
+
+// ════════════════════════════════════════════════════════════
+// 弹窗
+// ════════════════════════════════════════════════════════════
+
+function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+// ════════════════════════════════════════════════════════════
+// 指标管理
+// ════════════════════════════════════════════════════════════
+
+async function loadIndicators() {
+  try {
+    const res = await api.get('/api/indicators');
+    state.indicators = res.data || [];
+    renderIndicators();
+  } catch (e) { /* 静默 */ }
+}
+
+function renderIndicators() {
+  const tbody = document.getElementById('indicator-table-body');
+  const filter = document.getElementById('indicator-filter-category').value;
+  const search = document.getElementById('indicator-search').value.toLowerCase();
+
+  const categoryMap = { valuation: '估值', profitability: '盈利能力', growth: '成长性', leverage: '财务杠杆', price: '价格', other: '其他', financial: '财务' };
+  const sourceMap = { eastmoney_realtime: '东方财富-实时', eastmoney_report: '东方财富-年报', yahoo_statistics: 'Yahoo Finance', manual: '手动', auto: '自动' };
+
+  const filtered = state.indicators.filter(i => {
+    if (filter && i.category !== filter) return false;
+    if (search && !i.name.toLowerCase().includes(search) && !(i.name_en || '').toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  tbody.innerHTML = filtered.map(i => `
+    <tr>
+      <td class="font-medium">${esc(i.name)}</td>
+      <td class="text-gray-500">${esc(i.name_en || '-')}</td>
+      <td><span class="px-2 py-0.5 bg-gray-100 rounded text-xs">${categoryMap[i.category] || i.category}</span></td>
+      <td class="text-xs text-gray-500">${sourceMap[i.data_source] || i.data_source}</td>
+      <td>${esc(i.unit || '-')}</td>
+      <td>${i.is_builtin ? '<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">内置</span>' : '<span class="px-2 py-0.5 bg-gray-100 rounded text-xs">自定义</span>'}</td>
+      <td>
+        ${i.is_builtin ? '' : `
+          <button onclick="editIndicator(${i.id})" class="text-blue-500 hover:text-blue-700 text-xs mr-2">编辑</button>
+          <button onclick="removeIndicator(${i.id})" class="text-red-500 hover:text-red-700 text-xs">删除</button>
+        `}
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function addIndicator() {
+  const name = document.getElementById('new-indicator-name').value.trim();
+  if (!name) return toast('请输入指标名称', 'error');
+
+  try {
+    await api.post('/api/indicators', {
+      name,
+      name_en: document.getElementById('new-indicator-name-en').value.trim(),
+      category: document.getElementById('new-indicator-category').value,
+      unit: document.getElementById('new-indicator-unit').value.trim(),
+      data_source: document.getElementById('new-indicator-source').value,
+      source_field: document.getElementById('new-indicator-field').value.trim(),
+      description: document.getElementById('new-indicator-desc').value.trim(),
+    });
+    toast('指标创建成功', 'success');
+    hideModal('indicator-modal');
+    loadIndicators();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function removeIndicator(id) {
+  if (!confirm('确定删除此指标？')) return;
+  try {
+    await api.del('/api/indicators/' + id);
+    toast('已删除', 'success');
+    loadIndicators();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function editIndicator(id) {
+  const ind = state.indicators.find(i => i.id === id);
+  if (!ind) return;
+  document.getElementById('new-indicator-name').value = ind.name;
+  document.getElementById('new-indicator-name-en').value = ind.name_en || '';
+  document.getElementById('new-indicator-category').value = ind.category || 'financial';
+  document.getElementById('new-indicator-unit').value = ind.unit || '';
+  document.getElementById('new-indicator-source').value = ind.data_source || 'manual';
+  document.getElementById('new-indicator-field').value = ind.source_field || '';
+  document.getElementById('new-indicator-desc').value = ind.description || '';
+  showModal('indicator-modal');
+  // 替换添加按钮为更新
+  const addBtn = document.querySelector('#indicator-modal .btn-primary');
+  addBtn.textContent = '更新';
+  addBtn.onclick = async () => {
+    try {
+      await api.put('/api/indicators/' + id, {
+        name: document.getElementById('new-indicator-name').value.trim(),
+        name_en: document.getElementById('new-indicator-name-en').value.trim(),
+        category: document.getElementById('new-indicator-category').value,
+        unit: document.getElementById('new-indicator-unit').value.trim(),
+        data_source: document.getElementById('new-indicator-source').value,
+        source_field: document.getElementById('new-indicator-field').value.trim(),
+        description: document.getElementById('new-indicator-desc').value.trim(),
+      });
+      toast('指标更新成功', 'success');
+      hideModal('indicator-modal');
+      addBtn.textContent = '添加';
+      addBtn.onclick = addIndicator;
+      loadIndicators();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+}
+
+async function importIndicators(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const data = await readExcelFile(file);
+    if (data.length === 0) return toast('文件为空', 'error');
+    // 期望列：name, name_en, category, unit, data_source, source_field, description
+    const indicators = data.map(row => ({
+      name: row['name'] || row['指标名称'] || row['名称'] || '',
+      name_en: row['name_en'] || row['英文名'] || '',
+      category: row['category'] || row['分类'] || 'financial',
+      unit: row['unit'] || row['单位'] || '',
+      data_source: row['data_source'] || row['数据源'] || 'manual',
+      source_field: row['source_field'] || row['字段映射'] || '',
+      description: row['description'] || row['描述'] || '',
+    })).filter(i => i.name);
+
+    await api.post('/api/indicators/batch-import', { indicators });
+    toast(`导入完成`, 'success');
+    loadIndicators();
+  } catch (e) { toast('导入失败: ' + e.message, 'error'); }
+  event.target.value = '';
+}
+
+// ════════════════════════════════════════════════════════════
+// 策略配置
+// ════════════════════════════════════════════════════════════
+
+async function loadStrategies() {
+  try {
+    const res = await api.get('/api/strategies');
+    state.strategies = res.data || [];
+    renderStrategyList();
+  } catch (e) { /* 静默 */ }
+}
+
+function renderStrategyList() {
+  const container = document.getElementById('strategy-list');
+  container.innerHTML = state.strategies.map(s => `
+    <div class="p-2 rounded cursor-pointer hover:bg-blue-50 border ${state.currentStrategyId === s.id ? 'border-blue-400 bg-blue-50' : 'border-transparent'}"
+         onclick="selectStrategy(${s.id})">
+      <div class="font-medium text-sm">${esc(s.name)}</div>
+      <div class="text-xs text-gray-400">${esc(s.description || '无描述')}</div>
+    </div>
+  `).join('');
+}
+
+function selectStrategy(id) {
+  const strategy = state.strategies.find(s => s.id === id);
+  if (!strategy) return;
+
+  state.currentStrategyId = id;
+  document.getElementById('strategy-name').value = strategy.name;
+  document.getElementById('strategy-desc').value = strategy.description || '';
+
+  try {
+    state.currentConditionTree = JSON.parse(strategy.condition_tree);
+  } catch { state.currentConditionTree = { type: 'AND', children: [] }; }
+
+  document.getElementById('strategy-editor-placeholder').classList.add('hidden');
+  document.getElementById('strategy-editor').classList.remove('hidden');
+
+  renderConditionTree();
+  renderStrategyList();
+}
+
+function createNewStrategy() {
+  state.currentStrategyId = null;
+  state.currentConditionTree = { type: 'AND', children: [] };
+  document.getElementById('strategy-name').value = '';
+  document.getElementById('strategy-desc').value = '';
+  document.getElementById('strategy-editor-placeholder').classList.add('hidden');
+  document.getElementById('strategy-editor').classList.remove('hidden');
+  renderConditionTree();
+}
+
+async function saveCurrentStrategy() {
+  const name = document.getElementById('strategy-name').value.trim();
+  if (!name) return toast('请输入策略名称', 'error');
+
+  const data = {
+    name,
+    description: document.getElementById('strategy-desc').value.trim(),
+    condition_tree: state.currentConditionTree,
+  };
+
+  try {
+    if (state.currentStrategyId) {
+      await api.put('/api/strategies/' + state.currentStrategyId, data);
+      toast('策略更新成功', 'success');
+    } else {
+      const res = await api.post('/api/strategies', data);
+      state.currentStrategyId = res.id;
+      toast('策略创建成功', 'success');
+    }
+    loadStrategies();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteCurrentStrategy() {
+  if (!state.currentStrategyId) return;
+  if (!confirm('确定删除此策略？')) return;
+  try {
+    await api.del('/api/strategies/' + state.currentStrategyId);
+    state.currentStrategyId = null;
+    document.getElementById('strategy-editor').classList.add('hidden');
+    document.getElementById('strategy-editor-placeholder').classList.remove('hidden');
+    toast('策略已删除', 'success');
+    loadStrategies();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ── 条件树渲染 ──
+
+const DEPTH_COLORS = [
+  { border: 'border-blue-400', bg: 'bg-blue-50' },
+  { border: 'border-green-400', bg: 'bg-green-50' },
+  { border: 'border-purple-400', bg: 'bg-purple-50' },
+  { border: 'border-orange-400', bg: 'bg-orange-50' },
+];
+
+function renderConditionTree() {
+  const container = document.getElementById('condition-tree-container');
+  container.innerHTML = '';
+  container.appendChild(buildGroupDOM(state.currentConditionTree, 0, null, -1));
+  updateStrategyPreview();
+}
+
+function buildGroupDOM(node, depth, parentChildren, indexInParent) {
+  const colors = DEPTH_COLORS[depth % DEPTH_COLORS.length];
+  const div = document.createElement('div');
+  div.className = `condition-group border-l-4 ${colors.border} ${colors.bg} rounded p-3 my-2`;
+
+  // 组头部
+  const header = document.createElement('div');
+  header.className = 'flex items-center gap-2 mb-2 flex-wrap';
+
+  const select = document.createElement('select');
+  select.className = 'select text-xs';
+  select.innerHTML = `<option value="AND" ${node.type === 'AND' ? 'selected' : ''}>AND (全部满足)</option>
+                       <option value="OR" ${node.type === 'OR' ? 'selected' : ''}>OR (任一满足)</option>`;
+  select.onchange = () => { node.type = select.value; updateStrategyPreview(); };
+
+  const btnAddCond = document.createElement('button');
+  btnAddCond.className = 'btn btn-primary text-xs';
+  btnAddCond.textContent = '+ 条件';
+  btnAddCond.onclick = () => {
+    node.children.push({ type: 'condition', date_range: 'current', indicator_name: state.indicators[0]?.name || '', operator: '>', value: '' });
+    renderConditionTree();
+  };
+
+  const btnAddGroup = document.createElement('button');
+  btnAddGroup.className = 'btn btn-secondary text-xs';
+  btnAddGroup.textContent = '+ 子组';
+  btnAddGroup.onclick = () => {
+    node.children.push({ type: 'AND', children: [] });
+    renderConditionTree();
+  };
+
+  header.appendChild(select);
+  header.appendChild(btnAddCond);
+  header.appendChild(btnAddGroup);
+
+  // 根组不能删除
+  if (parentChildren) {
+    const btnRemove = document.createElement('button');
+    btnRemove.className = 'btn btn-danger text-xs';
+    btnRemove.textContent = 'x';
+    btnRemove.onclick = () => { parentChildren.splice(indexInParent, 1); renderConditionTree(); };
+    header.appendChild(btnRemove);
+  }
+
+  div.appendChild(header);
+
+  // 子节点
+  const childContainer = document.createElement('div');
+  childContainer.className = 'space-y-1';
+
+  (node.children || []).forEach((child, idx) => {
+    if (child.type === 'condition') {
+      childContainer.appendChild(buildConditionDOM(child, node.children, idx));
+    } else {
+      childContainer.appendChild(buildGroupDOM(child, depth + 1, node.children, idx));
+    }
+  });
+
+  div.appendChild(childContainer);
+  return div;
+}
+
+function buildConditionDOM(cond, parentChildren, index) {
+  const row = document.createElement('div');
+  row.className = 'flex items-center gap-2 bg-white p-2 rounded border flex-wrap';
+
+  // 日期范围
+  const dateSelect = document.createElement('select');
+  dateSelect.className = 'select text-xs w-24';
+  dateSelect.innerHTML = `
+    <option value="current" ${cond.date_range === 'current' ? 'selected' : ''}>当前</option>
+    <option value="1Y" ${cond.date_range === '1Y' ? 'selected' : ''}>最近1年</option>
+    <option value="3Y" ${cond.date_range === '3Y' ? 'selected' : ''}>最近3年</option>
+    <option value="5Y" ${cond.date_range === '5Y' ? 'selected' : ''}>最近5年</option>
+  `;
+  dateSelect.onchange = () => { cond.date_range = dateSelect.value; updateStrategyPreview(); };
+
+  // 指标选择
+  const indSelect = document.createElement('select');
+  indSelect.className = 'select text-xs flex-1 min-w-[120px]';
+  indSelect.innerHTML = state.indicators.map(i =>
+    `<option value="${esc(i.name)}" ${cond.indicator_name === i.name ? 'selected' : ''}>${esc(i.name)}</option>`
+  ).join('');
+  indSelect.onchange = () => { cond.indicator_name = indSelect.value; updateStrategyPreview(); };
+
+  // 运算符
+  const opSelect = document.createElement('select');
+  opSelect.className = 'select text-xs w-16';
+  opSelect.innerHTML = ['>', '>=', '<', '<=', '=', '!='].map(op =>
+    `<option value="${op}" ${cond.operator === op ? 'selected' : ''}>${op}</option>`
+  ).join('');
+  opSelect.onchange = () => { cond.operator = opSelect.value; updateStrategyPreview(); };
+
+  // 值
+  const valInput = document.createElement('input');
+  valInput.type = 'number';
+  valInput.className = 'input text-xs w-20';
+  valInput.value = cond.value;
+  valInput.placeholder = '值';
+  valInput.onchange = () => { cond.value = valInput.value; updateStrategyPreview(); };
+
+  // 单位提示
+  const ind = state.indicators.find(i => i.name === cond.indicator_name);
+  const unitSpan = document.createElement('span');
+  unitSpan.className = 'text-xs text-gray-400';
+  unitSpan.textContent = ind?.unit || '';
+
+  // 删除按钮
+  const btnDel = document.createElement('button');
+  btnDel.className = 'text-red-400 hover:text-red-600 text-lg leading-none';
+  btnDel.innerHTML = '&times;';
+  btnDel.onclick = () => { parentChildren.splice(index, 1); renderConditionTree(); };
+
+  row.appendChild(dateSelect);
+  row.appendChild(indSelect);
+  row.appendChild(opSelect);
+  row.appendChild(valInput);
+  row.appendChild(unitSpan);
+  row.appendChild(btnDel);
+
+  return row;
+}
+
+function updateStrategyPreview() {
+  const preview = document.getElementById('strategy-preview');
+  preview.textContent = conditionTreeToText(state.currentConditionTree);
+}
+
+function conditionTreeToText(node) {
+  if (node.type === 'condition') {
+    const dateLabel = { current: '当前', '1Y': '最近1年', '3Y': '最近3年', '5Y': '最近5年' }[node.date_range] || node.date_range;
+    return `${dateLabel} ${node.indicator_name} ${node.operator} ${node.value}`;
+  }
+
+  if (!node.children || node.children.length === 0) return '(空)';
+
+  const parts = node.children.map(c => conditionTreeToText(c));
+  const joiner = node.type === 'AND' ? ' 且 ' : ' 或 ';
+  return '(' + parts.join(joiner) + ')';
+}
+
+// ════════════════════════════════════════════════════════════
+// 任务管理
+// ════════════════════════════════════════════════════════════
+
+async function loadTasks() {
+  try {
+    const res = await api.get('/api/tasks');
+    state.tasks = res.data || [];
+    renderTasks();
+    // 同步加载策略供选择
+    if (state.strategies.length === 0) {
+      const sRes = await api.get('/api/strategies');
+      state.strategies = sRes.data || [];
+    }
+    populateTaskStrategySelect();
+  } catch (e) { /* 静默 */ }
+}
+
+function renderTasks() {
+  const tbody = document.getElementById('task-table-body');
+  const marketMap = { A: 'A股', US: '美股', HK: '港股' };
+
+  tbody.innerHTML = state.tasks.map(t => {
+    const statusColor = t.last_run_status === 'success' ? 'text-green-600' : t.last_run_status === 'error' ? 'text-red-600' : 'text-gray-400';
+    return `
+    <tr>
+      <td class="font-medium">${esc(t.name)}</td>
+      <td>${marketMap[t.market] || t.market}</td>
+      <td>${t.scope_type === 'all' ? '全部' : '特定'}</td>
+      <td class="text-xs">${esc(t.strategy_name || '-')}</td>
+      <td>${t.frequency_minutes}分钟</td>
+      <td class="text-xs">${t.monitor_start_time}-${t.monitor_end_time}</td>
+      <td>
+        <span class="inline-flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full ${t.is_active ? 'bg-green-400' : 'bg-gray-300'}"></span>
+          ${t.is_active ? '运行中' : '已暂停'}
+        </span>
+      </td>
+      <td class="text-xs">
+        <span class="${statusColor}">${t.last_run_status || '未运行'}</span>
+        ${t.last_run_message ? `<br><span class="text-gray-400">${esc(t.last_run_message)}</span>` : ''}
+      </td>
+      <td class="space-x-1">
+        <button onclick="runTask(${t.id})" class="text-blue-500 hover:text-blue-700 text-xs">执行</button>
+        <button onclick="toggleTask(${t.id}, ${t.is_active ? 0 : 1})" class="text-yellow-500 hover:text-yellow-700 text-xs">${t.is_active ? '暂停' : '启用'}</button>
+        <button onclick="removeTask(${t.id})" class="text-red-500 hover:text-red-700 text-xs">删除</button>
+      </td>
+    </tr>
+  `}).join('');
+}
+
+function populateTaskStrategySelect() {
+  const select = document.getElementById('new-task-strategy');
+  select.innerHTML = '<option value="">选择策略</option>' +
+    state.strategies.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+}
+
+function toggleStockCodes() {
+  const scope = document.querySelector('input[name="task-scope"]:checked').value;
+  document.getElementById('stock-codes-input').classList.toggle('hidden', scope !== 'specific');
+}
+
+async function importStockCodes(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const data = await readExcelFile(file);
+    const codes = data.map(row => row['code'] || row['股票代码'] || row['代码'] || Object.values(row)[0]).filter(Boolean);
+    document.getElementById('new-task-codes').value = codes.join('\n');
+    toast(`导入 ${codes.length} 个股票代码`, 'success');
+  } catch (e) { toast('导入失败', 'error'); }
+  event.target.value = '';
+}
+
+async function addTask() {
+  const name = document.getElementById('new-task-name').value.trim();
+  const market = document.querySelector('input[name="task-market"]:checked').value;
+  const scopeType = document.querySelector('input[name="task-scope"]:checked').value;
+  const strategyId = document.getElementById('new-task-strategy').value;
+
+  if (!name) return toast('请输入任务名称', 'error');
+  if (!strategyId) return toast('请选择策略', 'error');
+
+  let stockCodes = [];
+  if (scopeType === 'specific') {
+    const raw = document.getElementById('new-task-codes').value.trim();
+    stockCodes = raw.split(/[\n,，\s]+/).map(s => s.trim()).filter(Boolean);
+    if (stockCodes.length === 0) return toast('请输入股票代码', 'error');
+  }
+
+  try {
+    await api.post('/api/tasks', {
+      name, market, scope_type: scopeType, stock_codes: stockCodes,
+      strategy_id: parseInt(strategyId),
+      frequency_minutes: parseInt(document.getElementById('new-task-frequency').value),
+      monitor_start_time: document.getElementById('new-task-start-time').value,
+      monitor_end_time: document.getElementById('new-task-end-time').value,
+      date_start: document.getElementById('new-task-date-start').value || null,
+      date_end: document.getElementById('new-task-date-end').value || null,
+      notify_enabled: document.getElementById('new-task-notify').checked,
+      wechat_webhook_url: document.getElementById('new-task-webhook').value.trim(),
+    });
+    toast('任务创建成功', 'success');
+    hideModal('task-modal');
+    loadTasks();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function runTask(id) {
+  try {
+    await api.post('/api/tasks/' + id + '/run');
+    toast('任务已触发执行', 'success');
+    setTimeout(loadTasks, 3000);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function toggleTask(id, active) {
+  try {
+    await api.put('/api/tasks/' + id, { is_active: active });
+    toast(active ? '任务已启用' : '任务已暂停', 'success');
+    loadTasks();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function removeTask(id) {
+  if (!confirm('确定删除此任务？')) return;
+  try {
+    await api.del('/api/tasks/' + id);
+    toast('任务已删除', 'success');
+    loadTasks();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ════════════════════════════════════════════════════════════
+// 结果展示
+// ════════════════════════════════════════════════════════════
+
+async function loadResults() {
+  try {
+    // 加载筛选器选项
+    if (state.tasks.length === 0) {
+      const tRes = await api.get('/api/tasks');
+      state.tasks = tRes.data || [];
+    }
+    const gRes = await api.get('/api/result-groups');
+    state.resultGroups = gRes.data || [];
+
+    populateResultFilters();
+
+    const taskId = document.getElementById('result-filter-task').value;
+    const groupId = document.getElementById('result-filter-group').value;
+
+    let params = `?page=${state.resultPage}&limit=100`;
+    if (taskId) params += `&task_id=${taskId}`;
+    if (groupId) params += `&group_id=${groupId}`;
+
+    const res = await api.get('/api/results' + params);
+    state.results = res.data || [];
+    state.resultTotal = res.total || 0;
+
+    // 加载展示配置
+    try {
+      const dcRes = await api.get('/api/display-configs');
+      const defaultConfig = (dcRes.data || []).find(d => d.is_default);
+      if (defaultConfig) {
+        state.displayColumns = JSON.parse(defaultConfig.columns);
+      }
+    } catch { /* use default */ }
+
+    renderResults();
+  } catch (e) { /* 静默 */ }
+}
+
+function populateResultFilters() {
+  const taskSelect = document.getElementById('result-filter-task');
+  const currentTask = taskSelect.value;
+  taskSelect.innerHTML = '<option value="">全部任务</option>' +
+    state.tasks.map(t => `<option value="${t.id}" ${String(t.id) === currentTask ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+
+  const groupSelect = document.getElementById('result-filter-group');
+  const currentGroup = groupSelect.value;
+  groupSelect.innerHTML = '<option value="">全部（不按分组）</option>' +
+    state.resultGroups.map(g => `<option value="${g.id}" ${String(g.id) === currentGroup ? 'selected' : ''}>${esc(g.name)}</option>`).join('');
+}
+
+function renderResults() {
+  const thead = document.getElementById('result-table-head');
+  const tbody = document.getElementById('result-table-body');
+
+  // 固定列 + 配置的指标列
+  const fixedCols = ['股票代码', '股票名称'];
+  const displayCols = state.displayColumns.filter(c => !fixedCols.includes(c));
+  const allCols = [...fixedCols, ...displayCols, '匹配时间'];
+
+  thead.innerHTML = allCols.map(c => `<th>${esc(c)}</th>`).join('');
+
+  tbody.innerHTML = state.results.map(r => {
+    let vals = {};
+    try { vals = JSON.parse(r.indicator_values || '{}'); } catch {}
+
+    const cells = allCols.map(col => {
+      if (col === '股票代码') return `<td class="font-mono">${esc(r.stock_code)}</td>`;
+      if (col === '股票名称') return `<td class="font-medium">${esc(r.stock_name || '-')}</td>`;
+      if (col === '匹配时间') return `<td class="text-xs text-gray-400">${esc(r.matched_at || '-')}</td>`;
+
+      // 查找指标值
+      const v = vals[col];
+      if (v !== undefined && v !== null) {
+        return `<td>${formatNum(v)}</td>`;
+      }
+      return `<td class="text-gray-300">-</td>`;
+    });
+
+    return `<tr>${cells.join('')}</tr>`;
+  }).join('');
+
+  if (state.results.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="${allCols.length}" class="text-center text-gray-400 py-8">暂无数据</td></tr>`;
+  }
+
+  // 分页
+  const totalPages = Math.ceil(state.resultTotal / 100) || 1;
+  document.getElementById('result-pagination').innerHTML = `
+    <span>共 ${state.resultTotal} 条结果</span>
+    <div class="flex gap-1">
+      <button class="btn btn-secondary text-xs" ${state.resultPage <= 1 ? 'disabled' : ''} onclick="state.resultPage--;loadResults()">上一页</button>
+      <span class="px-2 py-1 text-xs">${state.resultPage} / ${totalPages}</span>
+      <button class="btn btn-secondary text-xs" ${state.resultPage >= totalPages ? 'disabled' : ''} onclick="state.resultPage++;loadResults()">下一页</button>
+    </div>
+  `;
+}
+
+function showSaveGroupModal() {
+  if (state.results.length === 0) return toast('没有可保存的结果', 'warning');
+  showModal('save-group-modal');
+}
+
+async function saveResultGroup() {
+  const name = document.getElementById('new-group-name').value.trim();
+  if (!name) return toast('请输入组名', 'error');
+
+  try {
+    await api.post('/api/result-groups', {
+      name,
+      description: document.getElementById('new-group-desc').value.trim(),
+      results: state.results,
+    });
+    toast('分组保存成功', 'success');
+    hideModal('save-group-modal');
+    loadResults();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function exportResultsExcel() {
+  if (state.results.length === 0) return toast('没有可导出的数据', 'warning');
+
+  const rows = state.results.map(r => {
+    let vals = {};
+    try { vals = JSON.parse(r.indicator_values || '{}'); } catch {}
+
+    const row = { '股票代码': r.stock_code, '股票名称': r.stock_name, '市场': r.market };
+    for (const col of state.displayColumns) {
+      if (col === '股票代码' || col === '股票名称') continue;
+      row[col] = vals[col] ?? '';
+    }
+    row['匹配时间'] = r.matched_at;
+    return row;
+  });
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '筛选结果');
+  XLSX.writeFile(wb, `股票筛选结果_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  toast('导出成功', 'success');
+}
+
+// ── 展示列配置 ──
+
+function renderDisplayConfigModal() {
+  const container = document.getElementById('display-config-list');
+  const allIndicators = ['股票代码', '股票名称', ...state.indicators.map(i => i.name), '匹配时间'];
+  const currentCols = new Set(state.displayColumns);
+
+  container.innerHTML = allIndicators.map(name => `
+    <label class="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
+      <input type="checkbox" value="${esc(name)}" ${currentCols.has(name) ? 'checked' : ''}>
+      <span class="text-sm">${esc(name)}</span>
+    </label>
+  `).join('');
+}
+
+async function saveDisplayColumns() {
+  const checkboxes = document.querySelectorAll('#display-config-list input[type="checkbox"]');
+  const cols = [];
+  checkboxes.forEach(cb => { if (cb.checked) cols.push(cb.value); });
+
+  state.displayColumns = cols;
+
+  try {
+    // 更新默认配置
+    const dcRes = await api.get('/api/display-configs');
+    const defaultConfig = (dcRes.data || []).find(d => d.is_default);
+    if (defaultConfig) {
+      await api.put('/api/display-configs/' + defaultConfig.id, { columns: cols, name: 'default' });
+    } else {
+      await api.post('/api/display-configs', { columns: cols, name: 'default', is_default: true });
+    }
+  } catch { /* 保存失败时仍使用本地状态 */ }
+
+  hideModal('display-config-modal');
+  renderResults();
+  toast('列配置已保存', 'success');
+}
+
+// ════════════════════════════════════════════════════════════
+// 系统设置
+// ════════════════════════════════════════════════════════════
+
+function saveApiUrl() {
+  const url = document.getElementById('setting-api-url').value.trim().replace(/\/+$/, '');
+  state.apiUrl = url;
+  localStorage.setItem('stock_monitor_api_url', url);
+  toast('API 地址已保存', 'success');
+  testApiConnection();
+}
+
+async function testApiConnection() {
+  const statusEl = document.getElementById('api-status');
+  try {
+    const res = await api.get('/api/health');
+    statusEl.textContent = 'API: 已连接';
+    statusEl.className = 'text-xs text-green-500';
+    toast('连接成功', 'success');
+  } catch (e) {
+    statusEl.textContent = 'API: 连接失败';
+    statusEl.className = 'text-xs text-red-500';
+    toast('连接失败: ' + e.message, 'error');
+  }
+}
+
+async function initDatabase() {
+  try {
+    await api.post('/api/init-db');
+    toast('数据库初始化成功', 'success');
+    loadIndicators();
+  } catch (e) { toast('初始化失败: ' + e.message, 'error'); }
+}
+
+async function saveWeChatUrl() {
+  const url = document.getElementById('setting-wechat-url').value.trim();
+  try {
+    await api.put('/api/settings', { wechat_webhook_url: url });
+    toast('已保存', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function testWeChatNotify() {
+  const url = document.getElementById('setting-wechat-url').value.trim();
+  if (!url) return toast('请输入 Webhook URL', 'error');
+  try {
+    await api.post('/api/test-notify', { webhook_url: url });
+    toast('测试通知已发送', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function clearAllCache() {
+  if (!confirm('确定清除所有缓存数据？')) return;
+  toast('缓存清除功能需在 Worker 端实现', 'warning');
+}
+
+// ════════════════════════════════════════════════════════════
+// 工具函数
+// ════════════════════════════════════════════════════════════
+
+function esc(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function formatNum(v) {
+  if (v === null || v === undefined) return '-';
+  const num = parseFloat(v);
+  if (isNaN(num)) return String(v);
+  if (Math.abs(num) >= 100000000) return (num / 100000000).toFixed(2) + '亿';
+  if (Math.abs(num) >= 10000) return (num / 10000).toFixed(2) + '万';
+  return Number.isInteger(num) ? String(num) : num.toFixed(2);
+}
+
+async function readExcelFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws);
+        resolve(data);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsBinaryString(file);
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+// 初始化
+// ════════════════════════════════════════════════════════════
+
+document.addEventListener('DOMContentLoaded', () => {
+  // 恢复 API URL
+  const savedUrl = localStorage.getItem('stock_monitor_api_url') || '';
+  document.getElementById('setting-api-url').value = savedUrl;
+  state.apiUrl = savedUrl;
+
+  // 加载当前tab数据
+  if (state.apiUrl) {
+    testApiConnection();
+    loadIndicators();
+  }
+
+  // 监听 display-config-modal 打开时渲染
+  const observer = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.target.id === 'display-config-modal' && !m.target.classList.contains('hidden')) {
+        if (state.indicators.length === 0) {
+          api.get('/api/indicators').then(res => {
+            state.indicators = res.data || [];
+            renderDisplayConfigModal();
+          }).catch(() => renderDisplayConfigModal());
+        } else {
+          renderDisplayConfigModal();
+        }
+      }
+    }
+  });
+  observer.observe(document.getElementById('display-config-modal'), { attributes: true, attributeFilter: ['class'] });
+});
+</script>
+</body>
+</html>
