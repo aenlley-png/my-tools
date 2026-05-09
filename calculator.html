@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>计算器</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Microsoft YaHei','Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#1a3c5e,#2563a8);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+
+.calc{width:100%;max-width:360px;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden}
+
+.calc-header{background:linear-gradient(135deg,#1a3c5e,#2563a8);color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between}
+.calc-header h1{font-size:15px;font-weight:600;letter-spacing:.5px}
+.calc-header .mode{font-size:11px;opacity:.8;background:rgba(255,255,255,.18);padding:3px 10px;border-radius:10px}
+
+.display{background:#0f172a;color:#fff;padding:18px 20px 22px;text-align:right;min-height:120px;display:flex;flex-direction:column;justify-content:flex-end;position:relative}
+.history{font-size:14px;color:#94a3b8;min-height:18px;word-break:break-all;line-height:1.4;max-height:40px;overflow:hidden}
+.expression{font-size:42px;font-weight:300;color:#fff;word-break:break-all;line-height:1.2;margin-top:6px;letter-spacing:.5px}
+.error{color:#f87171 !important;font-size:24px !important}
+
+.keys{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#e5e7eb}
+.key{background:#fff;border:none;padding:0;height:60px;font-size:20px;font-weight:500;color:#1a3c5e;cursor:pointer;transition:background .12s;font-family:inherit;user-select:none}
+.key:hover{background:#f0f4f8}
+.key:active{background:#dbeafe}
+.key-op{background:#f0f4f8;color:#2563a8;font-weight:600}
+.key-op:hover{background:#dbeafe}
+.key-fn{background:#e5e7eb;color:#4b5563;font-size:16px;font-weight:600}
+.key-fn:hover{background:#d1d9e6}
+.key-eq{background:linear-gradient(135deg,#2563a8,#1d4f8a);color:#fff;font-weight:600}
+.key-eq:hover{background:linear-gradient(135deg,#1d4f8a,#173d6a)}
+.key-eq:active{background:#173d6a}
+
+.history-panel{padding:0 20px 12px;background:#0f172a;max-height:140px;overflow-y:auto;border-top:1px solid #1e293b}
+.history-panel.empty{display:none}
+.history-title{color:#64748b;font-size:11px;padding:8px 0;display:flex;justify-content:space-between;align-items:center}
+.history-clear{background:none;border:none;color:#64748b;font-size:11px;cursor:pointer;padding:2px 8px;border-radius:4px}
+.history-clear:hover{background:#1e293b;color:#cbd5e1}
+.history-item{color:#cbd5e1;font-size:12px;padding:4px 0;border-top:1px solid #1e293b;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+.history-item:hover{color:#fff}
+.history-item .h-expr{color:#94a3b8;flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.history-item .h-res{color:#60a5fa;font-weight:600}
+
+.history-panel::-webkit-scrollbar{width:4px}
+.history-panel::-webkit-scrollbar-track{background:#0f172a}
+.history-panel::-webkit-scrollbar-thumb{background:#334155;border-radius:2px}
+</style>
+</head>
+<body>
+<div class="calc">
+  <div class="calc-header">
+    <h1>计算器</h1>
+    <span class="mode">标准</span>
+  </div>
+
+  <div class="display">
+    <div class="history" id="historyLine"></div>
+    <div class="expression" id="expression">0</div>
+  </div>
+
+  <div class="keys">
+    <button class="key key-fn" data-action="clear">AC</button>
+    <button class="key key-fn" data-action="backspace">⌫</button>
+    <button class="key key-fn" data-action="percent">%</button>
+    <button class="key key-op" data-op="/">÷</button>
+
+    <button class="key" data-num="7">7</button>
+    <button class="key" data-num="8">8</button>
+    <button class="key" data-num="9">9</button>
+    <button class="key key-op" data-op="*">×</button>
+
+    <button class="key" data-num="4">4</button>
+    <button class="key" data-num="5">5</button>
+    <button class="key" data-num="6">6</button>
+    <button class="key key-op" data-op="-">−</button>
+
+    <button class="key" data-num="1">1</button>
+    <button class="key" data-num="2">2</button>
+    <button class="key" data-num="3">3</button>
+    <button class="key key-op" data-op="+">+</button>
+
+    <button class="key" data-action="negate">±</button>
+    <button class="key" data-num="0">0</button>
+    <button class="key" data-action="dot">.</button>
+    <button class="key key-eq" data-action="equals">=</button>
+  </div>
+
+  <div class="history-panel empty" id="historyPanel">
+    <div class="history-title">
+      <span>历史记录</span>
+      <button class="history-clear" id="historyClear">清空</button>
+    </div>
+    <div id="historyList"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const exprEl = document.getElementById('expression');
+  const historyLineEl = document.getElementById('historyLine');
+  const historyPanel = document.getElementById('historyPanel');
+  const historyList = document.getElementById('historyList');
+  const historyClear = document.getElementById('historyClear');
+
+  let current = '0';
+  let previous = null;
+  let pendingOp = null;
+  let awaitingOperand = false;
+  let resultShown = false;
+  let errored = false;
+  const history = [];
+
+  const OP_LABEL = {'+':'+','-':'−','*':'×','/':'÷'};
+
+  function formatNumber(n){
+    if(!isFinite(n)) return 'Error';
+    if(Number.isInteger(n) && Math.abs(n) < 1e16) return n.toString();
+    const abs = Math.abs(n);
+    if(abs !== 0 && (abs < 1e-6 || abs >= 1e16)) return n.toExponential(8).replace(/\.?0+e/,'e');
+    let s = n.toPrecision(12);
+    if(s.indexOf('.') !== -1 && s.indexOf('e') === -1) s = s.replace(/\.?0+$/,'');
+    return s;
+  }
+
+  function render(){
+    exprEl.textContent = current;
+    exprEl.classList.toggle('error', errored);
+    if(previous !== null && pendingOp !== null){
+      historyLineEl.textContent = formatNumber(previous) + ' ' + OP_LABEL[pendingOp];
+    } else {
+      historyLineEl.textContent = '';
+    }
+  }
+
+  function renderHistory(){
+    if(history.length === 0){
+      historyPanel.classList.add('empty');
+      historyList.innerHTML = '';
+      return;
+    }
+    historyPanel.classList.remove('empty');
+    historyList.innerHTML = history.slice().reverse().map((h,i) => {
+      const idx = history.length - 1 - i;
+      return `<div class="history-item" data-idx="${idx}">
+        <span class="h-expr">${h.expr}</span>
+        <span class="h-res">= ${h.result}</span>
+      </div>`;
+    }).join('');
+  }
+
+  function pushHistory(expr, result){
+    history.push({expr, result});
+    if(history.length > 30) history.shift();
+    renderHistory();
+  }
+
+  function inputDigit(d){
+    if(errored) reset();
+    if(resultShown){ previous = null; pendingOp = null; resultShown = false; current = '0'; }
+    if(awaitingOperand){ current = '0'; awaitingOperand = false; }
+    if(current === '0') current = d;
+    else if(current.length < 16) current += d;
+    render();
+  }
+
+  function inputDot(){
+    if(errored) reset();
+    if(resultShown){ previous = null; pendingOp = null; resultShown = false; current = '0'; }
+    if(awaitingOperand){ current = '0'; awaitingOperand = false; }
+    if(current.indexOf('.') === -1) current += '.';
+    render();
+  }
+
+  function negate(){
+    if(errored || current === '0') return;
+    current = current.startsWith('-') ? current.slice(1) : '-' + current;
+    render();
+  }
+
+  function backspace(){
+    if(errored){ reset(); return; }
+    if(resultShown || awaitingOperand) return;
+    if(current.length <= 1 || (current.length === 2 && current.startsWith('-'))) current = '0';
+    else current = current.slice(0, -1);
+    render();
+  }
+
+  function percent(){
+    if(errored) return;
+    const n = parseFloat(current);
+    if(previous !== null && (pendingOp === '+' || pendingOp === '-')){
+      current = formatNumber(previous * n / 100);
+    } else {
+      current = formatNumber(n / 100);
+    }
+    render();
+  }
+
+  function compute(a, b, op){
+    switch(op){
+      case '+': return a + b;
+      case '-': return a - b;
+      case '*': return a * b;
+      case '/': return b === 0 ? NaN : a / b;
+    }
+    return b;
+  }
+
+  function setOp(op){
+    if(errored) return;
+    const n = parseFloat(current);
+    if(previous !== null && pendingOp !== null && !awaitingOperand){
+      const result = compute(previous, n, pendingOp);
+      if(!isFinite(result)){ showError(); return; }
+      previous = result;
+      current = formatNumber(result);
+    } else {
+      previous = n;
+    }
+    pendingOp = op;
+    awaitingOperand = true;
+    resultShown = false;
+    render();
+  }
+
+  function equals(){
+    if(errored || pendingOp === null || previous === null) return;
+    const n = parseFloat(current);
+    const result = compute(previous, n, pendingOp);
+    if(!isFinite(result)){ showError(); return; }
+    const expr = formatNumber(previous) + ' ' + OP_LABEL[pendingOp] + ' ' + formatNumber(n);
+    const resultStr = formatNumber(result);
+    pushHistory(expr, resultStr);
+    current = resultStr;
+    previous = null;
+    pendingOp = null;
+    awaitingOperand = false;
+    resultShown = true;
+    render();
+  }
+
+  function showError(){
+    errored = true;
+    current = 'Error';
+    previous = null;
+    pendingOp = null;
+    awaitingOperand = false;
+    resultShown = false;
+    render();
+  }
+
+  function reset(){
+    current = '0';
+    previous = null;
+    pendingOp = null;
+    awaitingOperand = false;
+    resultShown = false;
+    errored = false;
+    render();
+  }
+
+  document.querySelectorAll('.key').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const num = btn.dataset.num;
+      const op = btn.dataset.op;
+      const action = btn.dataset.action;
+      if(num !== undefined) inputDigit(num);
+      else if(op !== undefined) setOp(op);
+      else if(action === 'dot') inputDot();
+      else if(action === 'clear') reset();
+      else if(action === 'backspace') backspace();
+      else if(action === 'negate') negate();
+      else if(action === 'percent') percent();
+      else if(action === 'equals') equals();
+    });
+  });
+
+  historyClear.addEventListener('click', () => {
+    history.length = 0;
+    renderHistory();
+  });
+
+  historyList.addEventListener('click', e => {
+    const item = e.target.closest('.history-item');
+    if(!item) return;
+    const idx = parseInt(item.dataset.idx, 10);
+    const h = history[idx];
+    if(!h) return;
+    if(errored) errored = false;
+    current = h.result;
+    previous = null;
+    pendingOp = null;
+    awaitingOperand = false;
+    resultShown = true;
+    render();
+  });
+
+  document.addEventListener('keydown', e => {
+    if(e.key >= '0' && e.key <= '9'){ inputDigit(e.key); e.preventDefault(); return; }
+    if(e.key === '.'){ inputDot(); e.preventDefault(); return; }
+    if(e.key === '+' || e.key === '-' || e.key === '*' || e.key === '/'){ setOp(e.key); e.preventDefault(); return; }
+    if(e.key === 'Enter' || e.key === '='){ equals(); e.preventDefault(); return; }
+    if(e.key === 'Backspace'){ backspace(); e.preventDefault(); return; }
+    if(e.key === 'Escape'){ reset(); e.preventDefault(); return; }
+    if(e.key === '%'){ percent(); e.preventDefault(); return; }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
