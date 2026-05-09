@@ -106,6 +106,15 @@ tr:hover td{background:#f8fbff}
 .dual .lbl{font-size:10px;color:#9ca3af;width:14px;display:inline-block;text-align:center;border-radius:3px;font-weight:700}
 .dual .lbl-o{background:#dcfce7;color:#166534}
 .dual .lbl-a{background:#ede9fe;color:#5b21b6}
+
+/* 查询模式 Tabs（自然 / 广告） */
+.mode-tabs{display:flex;border-bottom:2px solid #eaeef5;margin:-4px -18px 14px;padding:0 8px;gap:0;background:#fafbfd;border-radius:8px 8px 0 0}
+.mode-tab{padding:11px 22px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#9ca3af;border-bottom:3px solid transparent;margin-bottom:-2px;transition:.18s;display:inline-flex;align-items:center;gap:6px}
+.mode-tab:hover:not(.active){color:#374151;background:#fff}
+.mode-tab.active{font-weight:700;background:#fff}
+.mode-tab[data-mode="organic"].active{color:#16a34a;border-bottom-color:#16a34a}
+.mode-tab[data-mode="ad"].active{color:#7c3aed;border-bottom-color:#7c3aed}
+.mode-hint{font-size:11px;color:#9ca3af;margin-left:auto;align-self:center;padding-right:14px}
 </style>
 </head>
 <body>
@@ -168,7 +177,12 @@ tr:hover td{background:#f8fbff}
 
   <!-- 输入区 -->
   <div class="card">
-    <div class="card-title">📝 查询输入</div>
+    <div class="mode-tabs">
+      <button class="mode-tab active" data-mode="organic" onclick="setMode('organic')">🌿 自然排名查询</button>
+      <button class="mode-tab" data-mode="ad" onclick="setMode('ad')">📣 广告排名查询</button>
+      <span class="mode-hint" id="modeHint">同一次查询会同时抓取两类，切换模式可秒切视图</span>
+    </div>
+    <div class="card-title" id="inputTitle">📝 自然排名查询输入</div>
     <div class="grid-2">
       <div class="form-group">
         <label class="form-label">站点</label>
@@ -190,7 +204,7 @@ tr:hover td{background:#f8fbff}
       </div>
     </div>
     <div class="btn-group">
-      <button class="btn btn-primary" id="btnQuery" onclick="runQuery()">🔍 开始查询</button>
+      <button class="btn btn-primary" id="btnQuery" onclick="runQuery()">🔍 查询自然排名</button>
       <button class="btn btn-ghost" onclick="loadDemo()">🎯 示例数据</button>
       <button class="btn btn-ghost" onclick="clearInputs()">🗑️ 清空</button>
       <span id="progressText" style="margin-left:auto;font-size:12px;color:#666"></span>
@@ -201,7 +215,7 @@ tr:hover td{background:#f8fbff}
   <!-- 结果区 -->
   <div class="card" id="resultCard" style="display:none">
     <div class="card-title">
-      📊 查询结果
+      <span id="resultTitle">📊 自然排名结果</span>
       <span id="resultMeta"></span>
       <div style="margin-left:auto" class="btn-group">
         <button class="btn btn-success btn-sm" onclick="exportExcel()">📥 导出 Excel</button>
@@ -248,10 +262,25 @@ tr:hover td{background:#f8fbff}
 
 <script>
 // ── 配置 & 存储 ───────────────────────────────────────────
-const LS_KEY = 'kwrank.settings.v1';
-const LS_HIS = 'kwrank.history.v1';
+const LS_KEY  = 'kwrank.settings.v1';
+const LS_HIS  = 'kwrank.history.v1';
+const LS_MODE = 'kwrank.mode';
 let settings = { proxyUrl: '', defaultDomain: 'amazon.com' };
-let lastResult = null;   // 最近一次完整结果
+let lastResult  = null;   // 最近一次完整结果
+let currentMode = (localStorage.getItem(LS_MODE) === 'ad') ? 'ad' : 'organic'; // 'organic' | 'ad'
+
+function setMode(m) {
+  if (m !== 'organic' && m !== 'ad') m = 'organic';
+  currentMode = m;
+  localStorage.setItem(LS_MODE, m);
+
+  document.querySelectorAll('.mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === m));
+  document.getElementById('inputTitle').textContent = m === 'organic' ? '📝 自然排名查询输入' : '📝 广告排名查询输入';
+  document.getElementById('btnQuery').textContent   = m === 'organic' ? '🔍 查询自然排名'   : '🔍 查询广告排名';
+  document.getElementById('resultTitle').textContent = m === 'organic' ? '📊 自然排名结果' : '📊 广告排名结果';
+
+  if (lastResult) renderResult(lastResult);
+}
 
 function loadSettings() {
   try { settings = { ...settings, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}') }; } catch {}
@@ -421,32 +450,34 @@ function setProgress(pct, txt) {
 // ── 渲染：矩阵 / 明细 / 页面 / 统计 ───────────────────────
 function renderResult(R) {
   document.getElementById('resultCard').style.display = 'block';
+  const M = currentMode;          // 'organic' | 'ad'
+  const ML = M === 'organic' ? '自然' : '广告';
+  const MC = M === 'organic' ? '#16a34a' : '#7c3aed';
 
   const errorKws = Object.keys(R.data).filter(k => R.data[k].error);
   const okKws    = Object.keys(R.data).filter(k => !R.data[k].error);
 
   document.getElementById('resultMeta').textContent =
-    ` · 站点 ${R.domain} · ${R.keywords.length} 关键词 × ${R.asins.length} ASIN · ${R.maxPages} 页` +
+    ` · ${ML}模式 · 站点 ${R.domain} · ${R.keywords.length} 关键词 × ${R.asins.length} ASIN · ${R.maxPages} 页` +
     (errorKws.length ? ` · ${errorKws.length} 个失败` : '');
 
-  // 顶部统计：自然 + 广告分别命中
-  let oHit = 0, aHit = 0;
+  // 顶部统计：仅显示当前模式相关
+  let hitCnt = 0, totalCnt = 0;
   const totalChecks = R.keywords.length * R.asins.length;
   for (const kw of okKws) {
+    totalCnt += (M === 'organic' ? R.data[kw].totalOrganic : R.data[kw].totalAd) || 0;
     for (const asin of R.asins) {
       const h = R.data[kw].hits[asin];
-      if (!h) continue;
-      if (h.organic) oHit++;
-      if (h.ad)      aHit++;
+      if (h && h[M]) hitCnt++;
     }
   }
   const stat = document.getElementById('statRow');
   stat.innerHTML = `
+    <div class="stat"><div class="stat-label">查询模式</div><div class="stat-value" style="color:${MC}">${ML}</div></div>
     <div class="stat"><div class="stat-label">总组合数</div><div class="stat-value">${totalChecks}</div></div>
-    <div class="stat"><div class="stat-label">自然位命中</div><div class="stat-value" style="color:#16a34a">${oHit}</div></div>
-    <div class="stat"><div class="stat-label">广告位命中</div><div class="stat-value" style="color:#7c3aed">${aHit}</div></div>
-    <div class="stat"><div class="stat-label">自然命中率</div><div class="stat-value">${totalChecks ? ((oHit/totalChecks)*100).toFixed(1) : 0}%</div></div>
-    <div class="stat"><div class="stat-label">广告命中率</div><div class="stat-value">${totalChecks ? ((aHit/totalChecks)*100).toFixed(1) : 0}%</div></div>
+    <div class="stat"><div class="stat-label">${ML}位命中</div><div class="stat-value" style="color:${MC}">${hitCnt}</div></div>
+    <div class="stat"><div class="stat-label">命中率</div><div class="stat-value">${totalChecks ? ((hitCnt/totalChecks)*100).toFixed(1) : 0}%</div></div>
+    <div class="stat"><div class="stat-label">扫到的${ML}位</div><div class="stat-value">${totalCnt}</div></div>
     <div class="stat"><div class="stat-label">失败关键词</div><div class="stat-value" style="color:${errorKws.length?'#dc2626':'#9ca3af'}">${errorKws.length}</div></div>
   `;
 
@@ -464,19 +495,15 @@ function rankClass(r) {
   return r <= 10 ? 'cell-rank-top' : r <= 30 ? 'cell-rank-mid' : 'cell-rank-low';
 }
 
-function dualRankCell(hit) {
-  if (!hit || (!hit.organic && !hit.ad)) return '<span class="cell-miss">—</span>';
-  let html = '<div class="dual">';
-  if (hit.organic) {
-    html += `<div class="row"><span class="lbl lbl-o" title="自然位">自</span>` +
-            `<span class="cell-rank ${rankClass(hit.organic.rank)}">P${hit.organic.page}-#${hit.organic.rank}</span></div>`;
-  }
-  if (hit.ad) {
-    html += `<div class="row"><span class="lbl lbl-a" title="广告位">广</span>` +
-            `<span class="cell-rank ${rankClass(hit.ad.rank)}">P${hit.ad.page}-#${hit.ad.rank}</span></div>`;
-  }
-  html += '</div>';
-  return html;
+function modeRankCell(hit) {
+  if (!hit) return '<span class="cell-miss">—</span>';
+  const slot = hit[currentMode];
+  if (!slot) return '<span class="cell-miss">—</span>';
+  const lbl = currentMode === 'organic'
+    ? '<span class="lbl lbl-o" title="自然位">自</span>'
+    : '<span class="lbl lbl-a" title="广告位">广</span>';
+  return `<div class="dual"><div class="row">${lbl}` +
+         `<span class="cell-rank ${rankClass(slot.rank)}">P${slot.page}-#${slot.rank}</span></div></div>`;
 }
 
 function thumbHtml(small, large, alt) {
@@ -486,10 +513,13 @@ function thumbHtml(small, large, alt) {
 }
 
 function renderMatrix(R) {
+  const M = currentMode;
+  const ML = M === 'organic' ? '自然' : '广告';
+  const badge = M === 'organic' ? 'green' : 'purple';
   const t = document.getElementById('matrixTbl');
   let html = '<thead><tr><th>关键词</th>';
   for (const a of R.asins) html += `<th>${escapeHtml(a)}</th>`;
-  html += '<th>命中</th></tr></thead><tbody>';
+  html += `<th>${ML}命中</th></tr></thead><tbody>`;
 
   for (const kw of R.keywords) {
     const d = R.data[kw];
@@ -498,17 +528,9 @@ function renderMatrix(R) {
       html += `<td colspan="${R.asins.length}" style="color:#dc2626">${escapeHtml(d.error)}</td>`;
       html += '<td><span class="badge badge-red">失败</span></td>';
     } else {
-      for (const a of R.asins) html += '<td>' + dualRankCell(d.hits[a]) + '</td>';
-      let oHit = 0, aHit = 0;
-      for (const a of R.asins) {
-        const h = d.hits[a]; if (!h) continue;
-        if (h.organic) oHit++;
-        if (h.ad)      aHit++;
-      }
-      html += `<td>` +
-        `<span class="badge badge-${oHit?'green':'gray'}" title="自然位命中">自 ${oHit}</span> ` +
-        `<span class="badge badge-${aHit?'purple':'gray'}" title="广告位命中">广 ${aHit}</span>` +
-        `</td>`;
+      for (const a of R.asins) html += '<td>' + modeRankCell(d.hits[a]) + '</td>';
+      const hitCnt = R.asins.filter(a => d.hits[a] && d.hits[a][M]).length;
+      html += `<td><span class="badge badge-${hitCnt ? badge : 'gray'}">${hitCnt}/${R.asins.length}</span></td>`;
     }
     html += '</tr>';
   }
@@ -517,34 +539,32 @@ function renderMatrix(R) {
 }
 
 function renderDetail(R) {
-  const t = document.getElementById('detailTbl');
-  let html = '<thead><tr><th>关键词</th><th>图</th><th>ASIN / 标题</th><th>自然位</th><th>广告位</th><th>站点</th></tr></thead><tbody>';
+  const M  = currentMode;
+  const ML = M === 'organic' ? '自然位' : '广告位';
+  const t  = document.getElementById('detailTbl');
+  let html = `<thead><tr><th>关键词</th><th>图</th><th>ASIN / 标题</th><th>页</th><th>${ML}排名</th><th>站点</th></tr></thead><tbody>`;
+
   for (const kw of R.keywords) {
     const d = R.data[kw];
     if (d.error) continue;
     for (const a of R.asins) {
-      const rec = d.hits[a];
-      if (!rec) {
+      const rec  = d.hits[a];
+      const slot = rec ? rec[M] : null;
+      if (!slot) {
         html += `<tr>
           <td>${escapeHtml(kw)}</td>
-          <td>${thumbHtml(null)}</td>
-          <td><a href="https://www.${R.domain}/dp/${a}" target="_blank">${escapeHtml(a)}</a><div class="title-cell" style="color:#9ca3af">未在前 ${R.maxPages} 页找到</div></td>
+          <td>${thumbHtml(rec ? rec.image : null, rec ? rec.image : null, rec ? rec.title : '')}</td>
+          <td><a href="https://www.${R.domain}/dp/${a}" target="_blank">${escapeHtml(a)}</a><div class="title-cell" style="color:#9ca3af">${rec && rec.title ? escapeHtml(rec.title) : '未在前 ' + R.maxPages + ' 页找到 ' + ML}</div></td>
           <td colspan="2" style="color:#9ca3af">—</td>
           <td>${R.domain}</td>
         </tr>`;
       } else {
-        const oCell = rec.organic
-          ? `<span class="cell-rank ${rankClass(rec.organic.rank)}">P${rec.organic.page}-#${rec.organic.rank}</span>`
-          : '<span class="cell-miss">—</span>';
-        const aCell = rec.ad
-          ? `<span class="cell-rank ${rankClass(rec.ad.rank)}">P${rec.ad.page}-#${rec.ad.rank}</span>`
-          : '<span class="cell-miss">—</span>';
         html += `<tr>
           <td>${escapeHtml(kw)}</td>
           <td>${thumbHtml(rec.image, rec.image, rec.title)}</td>
           <td><a href="https://www.${R.domain}/dp/${a}" target="_blank">${escapeHtml(a)}</a><div class="title-cell">${escapeHtml(rec.title || '')}</div></td>
-          <td>${oCell}</td>
-          <td>${aCell}</td>
+          <td>${slot.page}</td>
+          <td><span class="cell-rank ${rankClass(slot.rank)}">#${slot.rank}</span></td>
           <td>${R.domain}</td>
         </tr>`;
       }
@@ -561,20 +581,28 @@ function renderPage() {
   const t  = document.getElementById('pageTbl');
   if (!d || d.error) { t.innerHTML = '<tr><td>无可用结果</td></tr>'; return; }
 
+  const M = currentMode;
+  const ML = M === 'organic' ? '自然位' : '广告位';
   const trackedSet = new Set(lastResult.asins);
-  let html = '<thead><tr><th>序</th><th>图</th><th>页</th><th>类型</th><th>该类位次</th><th>ASIN / 标题</th><th>追踪</th></tr></thead><tbody>';
-  d.items.forEach((it, i) => {
-    const tracked = trackedSet.has(it.asin);
-    html += `<tr style="${tracked ? 'background:#fefce8' : ''}">
-      <td>${i + 1}</td>
-      <td>${thumbHtml(it.image, it.imageLarge || it.image, it.title)}</td>
-      <td>${it.page}</td>
-      <td>${it.sponsored ? '<span class="badge badge-purple">广告</span>' : '<span class="badge badge-blue">自然</span>'}</td>
-      <td><span class="cell-rank ${rankClass(it.rank)}">#${it.rank}</span></td>
-      <td><a href="https://www.${lastResult.domain}/dp/${it.asin}" target="_blank">${it.asin}</a><div class="title-cell">${escapeHtml(it.title || '')}</div></td>
-      <td>${tracked ? '<span class="badge badge-yellow">★</span>' : ''}</td>
-    </tr>`;
-  });
+  // 仅显示当前模式对应类型的搜索位
+  const items = d.items.filter(it => (M === 'organic') ? !it.sponsored : it.sponsored);
+
+  let html = `<thead><tr><th>序</th><th>图</th><th>页</th><th>${ML}排名</th><th>ASIN / 标题</th><th>追踪</th></tr></thead><tbody>`;
+  if (!items.length) {
+    html += `<tr><td colspan="6" style="color:#9ca3af;text-align:center;padding:24px">该关键词的前 ${lastResult.maxPages} 页未发现 ${ML}（可换关键词或加大扫描页数）</td></tr>`;
+  } else {
+    items.forEach((it, i) => {
+      const tracked = trackedSet.has(it.asin);
+      html += `<tr style="${tracked ? 'background:#fefce8' : ''}">
+        <td>${i + 1}</td>
+        <td>${thumbHtml(it.image, it.imageLarge || it.image, it.title)}</td>
+        <td>${it.page}</td>
+        <td><span class="cell-rank ${rankClass(it.rank)}">#${it.rank}</span></td>
+        <td><a href="https://www.${lastResult.domain}/dp/${it.asin}" target="_blank">${it.asin}</a><div class="title-cell">${escapeHtml(it.title || '')}</div></td>
+        <td>${tracked ? '<span class="badge badge-yellow">★</span>' : ''}</td>
+      </tr>`;
+    });
+  }
   html += '</tbody>';
   t.innerHTML = html;
   bindThumbHover();
@@ -608,73 +636,70 @@ function switchTab(name) {
 }
 
 // ── 导出 / 复制 ──────────────────────────────────────────
-function fmtCell(rec) {
+function fmtCellMode(rec) {
   if (!rec) return '';
-  const parts = [];
-  if (rec.organic) parts.push(`自 P${rec.organic.page}-#${rec.organic.rank}`);
-  if (rec.ad)      parts.push(`广 P${rec.ad.page}-#${rec.ad.rank}`);
-  return parts.join(' / ');
+  const slot = rec[currentMode];
+  if (!slot) return '';
+  return `P${slot.page}-#${slot.rank}`;
 }
 
 function exportExcel() {
   if (!lastResult) return toast('暂无结果可导出', 'warning');
-  const R  = lastResult;
-  const wb = XLSX.utils.book_new();
+  const R   = lastResult;
+  const M   = currentMode;
+  const ML  = M === 'organic' ? '自然' : '广告';
+  const wb  = XLSX.utils.book_new();
 
-  // Sheet1：矩阵
-  const mat = [['关键词', ...R.asins, '自然命中', '广告命中']];
+  // Sheet1：矩阵（仅当前模式）
+  const mat = [['关键词', ...R.asins, `${ML}命中`]];
   for (const kw of R.keywords) {
     const d = R.data[kw];
     const row = [kw];
     if (d.error) {
       for (const _ of R.asins) row.push('ERR');
-      row.push('FAIL: ' + d.error, '');
+      row.push('FAIL: ' + d.error);
     } else {
-      let oHit = 0, aHit = 0;
+      let hit = 0;
       for (const a of R.asins) {
         const rec = d.hits[a];
-        row.push(fmtCell(rec));
-        if (rec?.organic) oHit++;
-        if (rec?.ad)      aHit++;
+        row.push(fmtCellMode(rec));
+        if (rec && rec[M]) hit++;
       }
-      row.push(oHit + '/' + R.asins.length, aHit + '/' + R.asins.length);
+      row.push(hit + '/' + R.asins.length);
     }
     mat.push(row);
   }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mat), '矩阵');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mat), `${ML}矩阵`);
 
-  // Sheet2：明细（自然位 + 广告位 + 图片URL + 标题）
-  const det = [['关键词', 'ASIN', '标题', '自然-页', '自然位', '广告-页', '广告位', '图片URL', '站点']];
+  // Sheet2：明细（仅当前模式）
+  const det = [['关键词', 'ASIN', '标题', '页', `${ML}排名`, '图片URL', '站点']];
   for (const kw of R.keywords) {
     const d = R.data[kw];
     if (d.error) continue;
     for (const a of R.asins) {
-      const rec = d.hits[a];
-      if (!rec) det.push([kw, a, '', '', '', '', '', '', R.domain]);
-      else det.push([
-        kw, a, rec.title || '',
-        rec.organic ? rec.organic.page : '', rec.organic ? rec.organic.rank : '',
-        rec.ad ? rec.ad.page : '', rec.ad ? rec.ad.rank : '',
-        rec.image || '', R.domain,
-      ]);
+      const rec  = d.hits[a];
+      const slot = rec ? rec[M] : null;
+      if (!slot) det.push([kw, a, rec ? rec.title || '' : '', '', '', rec ? rec.image || '' : '', R.domain]);
+      else det.push([kw, a, rec.title || '', slot.page, slot.rank, rec.image || '', R.domain]);
     }
   }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(det), '明细');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(det), `${ML}明细`);
 
-  // Sheet3：完整页面
-  const all = [['关键词', '序', '页', '类型', '该类位次', 'ASIN', '标题', '图片URL', '追踪']];
+  // Sheet3：完整页面（仅当前模式类型）
+  const all = [['关键词', '序', '页', `${ML}排名`, 'ASIN', '标题', '图片URL', '追踪']];
   const trackedSet = new Set(R.asins);
   for (const kw of R.keywords) {
     const d = R.data[kw];
     if (d.error) continue;
-    d.items.forEach((it, i) => {
-      all.push([kw, i + 1, it.page, it.sponsored ? '广告' : '自然', it.rank, it.asin,
+    const items = d.items.filter(it => (M === 'organic') ? !it.sponsored : it.sponsored);
+    items.forEach((it, i) => {
+      all.push([kw, i + 1, it.page, it.rank, it.asin,
         it.title || '', it.image || '', trackedSet.has(it.asin) ? '★' : '']);
     });
   }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(all), '完整页面');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(all), `${ML}完整页面`);
 
-  const fname = `keyword-rank-${R.domain}-${new Date().toISOString().slice(0,10)}.xlsx`;
+  const fname = `keyword-rank-${ML}-${R.domain}-${new Date().toISOString().slice(0,10)}.xlsx`;
   XLSX.writeFile(wb, fname);
   toast('已导出 ' + fname, 'success');
 }
@@ -687,11 +712,11 @@ function copyMatrix() {
     const d = R.data[kw];
     const row = [kw];
     if (d.error) for (const _ of R.asins) row.push('ERR');
-    else for (const a of R.asins) row.push(fmtCell(d.hits[a]));
+    else for (const a of R.asins) row.push(fmtCellMode(d.hits[a]));
     txt += row.join('\t') + '\n';
   }
   navigator.clipboard.writeText(txt).then(
-    () => toast('矩阵已复制（可粘贴到 Excel）', 'success'),
+    () => toast(`${currentMode === 'organic' ? '自然' : '广告'}排名矩阵已复制`, 'success'),
     () => toast('复制失败', 'error')
   );
 }
@@ -754,6 +779,7 @@ function escapeAttr(s) {
 loadSettings();
 populateDomainSelect();
 renderHistory();
+setMode(currentMode);    // 应用启动时同步模式 UI
 </script>
 </body>
 </html>
