@@ -1,40 +1,22 @@
 /**
- * Cloudflare Worker — Amazon 关键词搜索排名查询代理
+ * Cloudflare Worker — Amazon 关键词搜索排名查询（前后端一体）
  *
- * 功能：
- *   - 接收关键词 + ASIN 列表
- *   - 抓取 Amazon 搜索结果页 HTML
- *   - 解析自然搜索位(SP) 与赞助广告位(SP)
- *   - 返回每个 ASIN 的排名（页码 + 自然位 + 总位次）
+ * - GET  /            → 返回前端 HTML（内嵌，base64 解码）
+ * - POST /            → 关键词排名查询 API
+ * - GET  /api/health  → 健康检查
  *
  * 部署：
- *   1. cloudflare.com → Workers & Pages → 创建 Worker
- *   2. 把本文件全部内容粘贴并部署
- *   3. 把 Worker URL 填入前端 keyword-rank.html 的"代理 URL"
+ *   1. npm i -g wrangler   # 或使用 npx wrangler
+ *   2. CLOUDFLARE_API_TOKEN=xxx wrangler deploy -c wrangler-kw.toml
  *
  * 请求协议（POST JSON）：
  *   {
- *     domain: "amazon.com",          // 亚马逊站点域名
- *     keywords: ["kw1", "kw2"],      // 待查询关键词
- *     asins:    ["B0...", "B0..."],  // 待匹配 ASIN（大小写不敏感）
- *     maxPages: 3,                   // 每个关键词扫描的页数（每页 ~48 自然位）
- *     countSponsored: false          // 是否把广告位计入排名
- *   }
- *
- * 响应：
- *   {
- *     success: true,
- *     data: {
- *       "kw1": {
- *         totalOrganic: 48,
- *         totalSponsored: 6,
- *         scannedPages: 3,
- *         items: [{ asin, organicRank, overallRank, page, sponsored }, ...],
- *         hits: { "B0...": { organicRank, overallRank, page, sponsored }, ... }
- *       }
- *     }
+ *     domain: "amazon.com", keywords: [...], asins: [...],
+ *     maxPages: 3, countSponsored: false
  *   }
  */
+
+import { HTML_B64 } from './keyword-rank-html.js';
 
 const UA_POOL = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -65,19 +47,45 @@ const ACCEPT_LANG_MAP = {
   'amazon.com.tr': 'tr-TR,tr;q=0.9,en;q=0.7',
 };
 
-addEventListener('fetch', event => {
-  event.respondWith(handle(event.request));
-});
+let _htmlCache = null;
+function decodeHtml() {
+  if (_htmlCache) return _htmlCache;
+  const bin = atob(HTML_B64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  _htmlCache = new TextDecoder('utf-8').decode(bytes);
+  return _htmlCache;
+}
 
-async function handle(request) {
-  if (request.method === 'OPTIONS') return cors('', 204);
-  if (request.method === 'GET') {
-    return cors(JSON.stringify({ ok: true, name: 'amz-keyword-rank', version: 1 }), 200);
-  }
-  if (request.method !== 'POST') {
-    return cors(JSON.stringify({ success: false, message: '仅支持 POST' }), 405);
-  }
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
 
+    if (request.method === 'OPTIONS') return cors('', 204);
+
+    if (request.method === 'GET') {
+      if (url.pathname === '/api/health') {
+        return cors(JSON.stringify({ ok: true, name: 'amz-keyword-rank', version: 2 }), 200);
+      }
+      // GET / → 前端
+      return new Response(decodeHtml(), {
+        status: 200,
+        headers: {
+          'Content-Type':  'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=300',
+        },
+      });
+    }
+
+    if (request.method !== 'POST') {
+      return cors(JSON.stringify({ success: false, message: '仅支持 POST' }), 405);
+    }
+
+    return handleQuery(request);
+  },
+};
+
+async function handleQuery(request) {
   let body;
   try { body = await request.json(); }
   catch { return cors(JSON.stringify({ success: false, message: '请求体解析失败' }), 400); }
@@ -88,15 +96,10 @@ async function handle(request) {
   const maxPages = Math.max(1, Math.min(7, parseInt(body.maxPages, 10) || 3));
   const countSponsored = !!body.countSponsored;
 
-  if (!keywords.length) {
-    return cors(JSON.stringify({ success: false, message: '关键词为空' }), 400);
-  }
-  if (!/^amazon\.[a-z.]+$/.test(domain)) {
-    return cors(JSON.stringify({ success: false, message: '非法域名' }), 400);
-  }
+  if (!keywords.length) return cors(JSON.stringify({ success: false, message: '关键词为空' }), 400);
+  if (!/^amazon\.[a-z.]+$/.test(domain)) return cors(JSON.stringify({ success: false, message: '非法域名' }), 400);
 
   const data = {};
-  // 关键词之间串行（避免 IP 风控），同一关键词内部页面也串行
   for (const kw of keywords) {
     try {
       data[kw] = await scanKeyword(domain, kw, asins, maxPages, countSponsored);
@@ -104,15 +107,12 @@ async function handle(request) {
       data[kw] = { error: e.message || String(e), items: [], hits: {} };
     }
   }
-
   return cors(JSON.stringify({ success: true, data }), 200);
 }
 
 async function scanKeyword(domain, keyword, asins, maxPages, countSponsored) {
   const items = [];
-  let organicCounter = 0;
-  let sponsoredCounter = 0;
-  let scannedPages = 0;
+  let organicCounter = 0, sponsoredCounter = 0, scannedPages = 0;
 
   for (let page = 1; page <= maxPages; page++) {
     const html = await fetchSearchPage(domain, keyword, page);
@@ -122,7 +122,7 @@ async function scanKeyword(domain, keyword, asins, maxPages, countSponsored) {
     if (!parsed.length && page === 1) {
       throw new Error('搜索结果解析为空（可能被风控或域名错误）');
     }
-    if (!parsed.length) break; // 后续页空 → 停止
+    if (!parsed.length) break;
 
     for (const it of parsed) {
       if (it.sponsored) sponsoredCounter++;
@@ -142,7 +142,6 @@ async function scanKeyword(domain, keyword, asins, maxPages, countSponsored) {
     }
   }
 
-  // 命中映射
   const hits = {};
   const asinSet = new Set(asins);
   for (const it of items) {
@@ -155,14 +154,7 @@ async function scanKeyword(domain, keyword, asins, maxPages, countSponsored) {
       };
     }
   }
-
-  return {
-    totalOrganic:   organicCounter,
-    totalSponsored: sponsoredCounter,
-    scannedPages,
-    items,
-    hits,
-  };
+  return { totalOrganic: organicCounter, totalSponsored: sponsoredCounter, scannedPages, items, hits };
 }
 
 async function fetchSearchPage(domain, keyword, page) {
@@ -184,9 +176,7 @@ async function fetchSearchPage(domain, keyword, page) {
     cf: { cacheTtl: 0 },
   });
 
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status} (${url})`);
-  }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} (${url})`);
   const html = await resp.text();
   if (/api-services-support@amazon|automated access|Robot Check|captcha/i.test(html)) {
     throw new Error('Amazon 风控（验证码）触发，建议降低频率或更换出口 IP');
@@ -194,28 +184,21 @@ async function fetchSearchPage(domain, keyword, page) {
   return html;
 }
 
-/**
- * 解析 Amazon 搜索结果 HTML
- * 返回按页面顺序排列的 [{asin, sponsored}, ...]
- */
 function parseHtml(html) {
-  // 匹配每个搜索结果容器的开标签
   const re = /<div\b([^>]*data-component-type="s-search-result"[^>]*)>/g;
   const blocks = [];
   let m;
   while ((m = re.exec(html)) !== null) {
-    const attrs   = m[1];
+    const attrs = m[1];
     const asinMatch = attrs.match(/data-asin="([A-Z0-9]{10})"/i);
     if (!asinMatch) continue;
     blocks.push({ asin: asinMatch[1].toUpperCase(), start: m.index });
   }
-
   const items = [];
   for (let i = 0; i < blocks.length; i++) {
-    const b      = blocks[i];
-    const next   = blocks[i + 1] ? blocks[i + 1].start : Math.min(html.length, b.start + 12000);
-    const chunk  = html.slice(b.start, next);
-    // 广告位指纹
+    const b    = blocks[i];
+    const next = blocks[i + 1] ? blocks[i + 1].start : Math.min(html.length, b.start + 12000);
+    const chunk = html.slice(b.start, next);
     const sponsored =
       /class="[^"]*puis-sponsored-label/i.test(chunk) ||
       /aria-label="[^"]*Sponsored/i.test(chunk) ||

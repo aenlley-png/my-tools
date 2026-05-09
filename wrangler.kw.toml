@@ -1,0 +1,14 @@
+# Cloudflare Worker — Amazon 关键词排名查询
+#
+# 部署：
+#   1. node build-html.js                       # 编辑过 HTML 后重新打包
+#   2. CLOUDFLARE_API_TOKEN=xxx \
+#      npx wrangler@latest deploy -c wrangler.kw.toml
+#
+# 这是独立的 Worker，与根目录 wrangler.toml（stock-monitor）互不干扰。
+
+name               = "amz-kw-rank"
+main               = "keyword-rank-worker.js"
+compatibility_date = "2024-12-01"
+account_id         = "75dcae046cb7628fe65f45f4e4b04e77"
+workers_dev        = true

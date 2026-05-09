@@ -290,12 +290,25 @@ async function testProxy() {
     toast('连接失败：' + e.message, 'error');
   }
 }
+function effectiveProxyUrl() {
+  if (settings.proxyUrl) return settings.proxyUrl;
+  // 同源回退：当 HTML 由 Worker 自身托管时，POST 同源即可
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    return location.origin;
+  }
+  return '';
+}
 function updateApiStatus() {
   const el = document.getElementById('apiStatus');
+  const url = effectiveProxyUrl();
   if (settings.proxyUrl) {
     el.className = 'badge badge-green';
     el.textContent = '代理：已配置';
     el.title = settings.proxyUrl;
+  } else if (url) {
+    el.className = 'badge badge-blue';
+    el.textContent = '代理：同源 (' + new URL(url).host + ')';
+    el.title = url;
   } else {
     el.className = 'badge badge-gray';
     el.textContent = '代理：未配置';
@@ -337,7 +350,8 @@ function uniq(arr) { return [...new Set(arr)]; }
 
 // ── 主查询 ───────────────────────────────────────────────
 async function runQuery() {
-  if (!settings.proxyUrl) {
+  const proxy = effectiveProxyUrl();
+  if (!proxy) {
     toast('请先在设置中填入代理 URL', 'warning');
     openSettings();
     return;
@@ -364,7 +378,7 @@ async function runQuery() {
   let resp;
   try {
     setProgress(10, '联机代理…（耗时取决于关键词数 × 页数）');
-    const r = await fetch(settings.proxyUrl, {
+    const r = await fetch(proxy, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ domain, keywords, asins, maxPages, countSponsored }),
