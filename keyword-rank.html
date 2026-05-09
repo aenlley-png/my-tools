@@ -92,11 +92,26 @@ tr:hover td{background:#f8fbff}
 .tab-pane.active{display:block}
 
 .kbd{display:inline-block;padding:1px 6px;background:#f3f4f6;border:1px solid #d1d9e6;border-radius:3px;font-family:monospace;font-size:11px;color:#555}
+
+/* 缩略图 */
+.thumb{width:38px;height:38px;object-fit:contain;border:1px solid #eaeef5;border-radius:3px;background:#fff;vertical-align:middle;cursor:zoom-in;transition:transform .1s}
+.thumb:hover{border-color:#2563a8}
+.thumb-empty{display:inline-block;width:38px;height:38px;border:1px dashed #d1d9e6;border-radius:3px;background:#fafbfc;color:#cbd5e0;text-align:center;line-height:38px;font-size:18px;vertical-align:middle}
+#imgPreview{display:none;position:fixed;width:300px;height:300px;object-fit:contain;background:#fff;border:1px solid #d1d9e6;border-radius:6px;padding:4px;box-shadow:0 8px 28px rgba(0,0,0,.28);z-index:9999;pointer-events:none}
+.title-cell{max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#555}
+
+/* 双排名单元格 */
+.dual{display:flex;flex-direction:column;gap:2px;font-size:11px;line-height:1.3}
+.dual .row{display:flex;align-items:center;gap:4px}
+.dual .lbl{font-size:10px;color:#9ca3af;width:14px;display:inline-block;text-align:center;border-radius:3px;font-weight:700}
+.dual .lbl-o{background:#dcfce7;color:#166534}
+.dual .lbl-a{background:#ede9fe;color:#5b21b6}
 </style>
 </head>
 <body>
 
 <div class="toast-box" id="toastBox"></div>
+<img id="imgPreview" alt="">
 
 <div class="header">
   <div>
@@ -154,21 +169,14 @@ tr:hover td{background:#f8fbff}
   <!-- 输入区 -->
   <div class="card">
     <div class="card-title">📝 查询输入</div>
-    <div class="grid-3">
+    <div class="grid-2">
       <div class="form-group">
         <label class="form-label">站点</label>
         <select id="domain" class="form-control"></select>
       </div>
       <div class="form-group">
-        <label class="form-label">扫描页数 <span class="hint">1-7，每页约 48 个自然位</span></label>
+        <label class="form-label">扫描页数 <span class="hint">1-7，每页约 48 个自然位 + 6-12 个广告位</span></label>
         <input type="number" id="maxPages" class="form-control" value="3" min="1" max="7">
-      </div>
-      <div class="form-group">
-        <label class="form-label">广告位计入排名</label>
-        <select id="countSponsored" class="form-control">
-          <option value="false">否（仅自然位）</option>
-          <option value="true">是（综合位次）</option>
-        </select>
       </div>
     </div>
     <div class="grid-2">
@@ -366,9 +374,8 @@ async function runQuery() {
   if (invalidAsins.length) toast('忽略 ' + invalidAsins.length + ' 个非法 ASIN', 'warning');
   if (!asins.length)    return toast('未找到合法 ASIN（应为 10 位大写字母/数字）', 'error');
 
-  const domain         = document.getElementById('domain').value;
-  const maxPages       = parseInt(document.getElementById('maxPages').value, 10) || 3;
-  const countSponsored = document.getElementById('countSponsored').value === 'true';
+  const domain   = document.getElementById('domain').value;
+  const maxPages = parseInt(document.getElementById('maxPages').value, 10) || 3;
 
   const btn = document.getElementById('btnQuery');
   btn.disabled = true; btn.textContent = '⏳ 查询中…';
@@ -381,7 +388,7 @@ async function runQuery() {
     const r = await fetch(proxy, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ domain, keywords, asins, maxPages, countSponsored }),
+      body:    JSON.stringify({ domain, keywords, asins, maxPages }),
     });
     setProgress(80, '解析结果…');
     resp = await r.json();
@@ -394,9 +401,9 @@ async function runQuery() {
   }
   setProgress(100, '完成 (' + ((Date.now() - t0) / 1000).toFixed(1) + 's)');
 
-  lastResult = { domain, keywords, asins, maxPages, countSponsored, data: resp.data, ts: Date.now() };
+  lastResult = { domain, keywords, asins, maxPages, data: resp.data, ts: Date.now() };
   pushHistory({
-    ts: lastResult.ts, domain, maxPages, countSponsored,
+    ts: lastResult.ts, domain, maxPages,
     keywords, asins,
   });
   renderResult(lastResult);
@@ -419,49 +426,70 @@ function renderResult(R) {
   const okKws    = Object.keys(R.data).filter(k => !R.data[k].error);
 
   document.getElementById('resultMeta').textContent =
-    ` · 站点 ${R.domain} · ${R.keywords.length} 关键词 × ${R.asins.length} ASIN · ` +
-    `${R.maxPages} 页 · ${R.countSponsored ? '综合位' : '自然位'}` +
+    ` · 站点 ${R.domain} · ${R.keywords.length} 关键词 × ${R.asins.length} ASIN · ${R.maxPages} 页` +
     (errorKws.length ? ` · ${errorKws.length} 个失败` : '');
 
-  // 顶部统计
-  let totalHits = 0, totalChecks = R.keywords.length * R.asins.length;
+  // 顶部统计：自然 + 广告分别命中
+  let oHit = 0, aHit = 0;
+  const totalChecks = R.keywords.length * R.asins.length;
   for (const kw of okKws) {
     for (const asin of R.asins) {
-      if (R.data[kw].hits[asin]) totalHits++;
+      const h = R.data[kw].hits[asin];
+      if (!h) continue;
+      if (h.organic) oHit++;
+      if (h.ad)      aHit++;
     }
   }
   const stat = document.getElementById('statRow');
   stat.innerHTML = `
     <div class="stat"><div class="stat-label">总组合数</div><div class="stat-value">${totalChecks}</div></div>
-    <div class="stat"><div class="stat-label">命中数</div><div class="stat-value" style="color:#16a34a">${totalHits}</div></div>
-    <div class="stat"><div class="stat-label">未命中</div><div class="stat-value" style="color:#9ca3af">${totalChecks - totalHits}</div></div>
-    <div class="stat"><div class="stat-label">命中率</div><div class="stat-value">${totalChecks ? ((totalHits/totalChecks)*100).toFixed(1) : 0}%</div></div>
+    <div class="stat"><div class="stat-label">自然位命中</div><div class="stat-value" style="color:#16a34a">${oHit}</div></div>
+    <div class="stat"><div class="stat-label">广告位命中</div><div class="stat-value" style="color:#7c3aed">${aHit}</div></div>
+    <div class="stat"><div class="stat-label">自然命中率</div><div class="stat-value">${totalChecks ? ((oHit/totalChecks)*100).toFixed(1) : 0}%</div></div>
+    <div class="stat"><div class="stat-label">广告命中率</div><div class="stat-value">${totalChecks ? ((aHit/totalChecks)*100).toFixed(1) : 0}%</div></div>
     <div class="stat"><div class="stat-label">失败关键词</div><div class="stat-value" style="color:${errorKws.length?'#dc2626':'#9ca3af'}">${errorKws.length}</div></div>
   `;
 
   renderMatrix(R);
   renderDetail(R);
 
-  // 页面视图选项
   const psel = document.getElementById('pageKwSelect');
   psel.innerHTML = okKws.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
   if (okKws.length) renderPage();
+
+  bindThumbHover();
 }
 
-function rankCell(rec) {
-  if (!rec) return '<span class="cell-miss">—</span>';
-  const r = rec.organicRank ?? rec.overallRank;
-  if (r == null) return '<span class="cell-miss">—</span>';
-  const cls = r <= 10 ? 'cell-rank-top' : r <= 30 ? 'cell-rank-mid' : 'cell-rank-low';
-  const tag = rec.sponsored ? ' <span class="badge badge-purple" style="margin-left:4px">广告</span>' : '';
-  return `<span class="cell-rank ${cls}">P${rec.page}-#${r}</span>${tag}`;
+function rankClass(r) {
+  return r <= 10 ? 'cell-rank-top' : r <= 30 ? 'cell-rank-mid' : 'cell-rank-low';
+}
+
+function dualRankCell(hit) {
+  if (!hit || (!hit.organic && !hit.ad)) return '<span class="cell-miss">—</span>';
+  let html = '<div class="dual">';
+  if (hit.organic) {
+    html += `<div class="row"><span class="lbl lbl-o" title="自然位">自</span>` +
+            `<span class="cell-rank ${rankClass(hit.organic.rank)}">P${hit.organic.page}-#${hit.organic.rank}</span></div>`;
+  }
+  if (hit.ad) {
+    html += `<div class="row"><span class="lbl lbl-a" title="广告位">广</span>` +
+            `<span class="cell-rank ${rankClass(hit.ad.rank)}">P${hit.ad.page}-#${hit.ad.rank}</span></div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function thumbHtml(small, large, alt) {
+  if (!small) return '<span class="thumb-empty" title="无图">·</span>';
+  const big = large || small;
+  return `<img class="thumb" src="${escapeAttr(small)}" data-full="${escapeAttr(big)}" alt="${escapeAttr(alt || '')}" loading="lazy">`;
 }
 
 function renderMatrix(R) {
   const t = document.getElementById('matrixTbl');
   let html = '<thead><tr><th>关键词</th>';
   for (const a of R.asins) html += `<th>${escapeHtml(a)}</th>`;
-  html += '<th>状态</th></tr></thead><tbody>';
+  html += '<th>命中</th></tr></thead><tbody>';
 
   for (const kw of R.keywords) {
     const d = R.data[kw];
@@ -470,9 +498,17 @@ function renderMatrix(R) {
       html += `<td colspan="${R.asins.length}" style="color:#dc2626">${escapeHtml(d.error)}</td>`;
       html += '<td><span class="badge badge-red">失败</span></td>';
     } else {
-      for (const a of R.asins) html += '<td>' + rankCell(d.hits[a]) + '</td>';
-      const hitCnt = R.asins.filter(a => d.hits[a]).length;
-      html += `<td><span class="badge badge-${hitCnt ? 'green' : 'gray'}">${hitCnt}/${R.asins.length}</span></td>`;
+      for (const a of R.asins) html += '<td>' + dualRankCell(d.hits[a]) + '</td>';
+      let oHit = 0, aHit = 0;
+      for (const a of R.asins) {
+        const h = d.hits[a]; if (!h) continue;
+        if (h.organic) oHit++;
+        if (h.ad)      aHit++;
+      }
+      html += `<td>` +
+        `<span class="badge badge-${oHit?'green':'gray'}" title="自然位命中">自 ${oHit}</span> ` +
+        `<span class="badge badge-${aHit?'purple':'gray'}" title="广告位命中">广 ${aHit}</span>` +
+        `</td>`;
     }
     html += '</tr>';
   }
@@ -482,24 +518,33 @@ function renderMatrix(R) {
 
 function renderDetail(R) {
   const t = document.getElementById('detailTbl');
-  let html = '<thead><tr><th>关键词</th><th>ASIN</th><th>页码</th><th>自然位</th><th>综合位</th><th>类型</th><th>站点</th></tr></thead><tbody>';
+  let html = '<thead><tr><th>关键词</th><th>图</th><th>ASIN / 标题</th><th>自然位</th><th>广告位</th><th>站点</th></tr></thead><tbody>';
   for (const kw of R.keywords) {
     const d = R.data[kw];
     if (d.error) continue;
     for (const a of R.asins) {
       const rec = d.hits[a];
       if (!rec) {
-        html += `<tr><td>${escapeHtml(kw)}</td><td>${escapeHtml(a)}</td><td colspan="4" style="color:#9ca3af">未在前 ${R.maxPages} 页找到</td><td>${R.domain}</td></tr>`;
-      } else {
-        const cls = (rec.organicRank ?? rec.overallRank) <= 10 ? 'cell-rank-top'
-                  : (rec.organicRank ?? rec.overallRank) <= 30 ? 'cell-rank-mid' : 'cell-rank-low';
         html += `<tr>
           <td>${escapeHtml(kw)}</td>
-          <td><a href="https://www.${R.domain}/dp/${a}" target="_blank">${escapeHtml(a)}</a></td>
-          <td>${rec.page}</td>
-          <td class="${cls}"><strong>${rec.organicRank ?? '—'}</strong></td>
-          <td><strong>${rec.overallRank ?? '—'}</strong></td>
-          <td>${rec.sponsored ? '<span class="badge badge-purple">广告</span>' : '<span class="badge badge-blue">自然</span>'}</td>
+          <td>${thumbHtml(null)}</td>
+          <td><a href="https://www.${R.domain}/dp/${a}" target="_blank">${escapeHtml(a)}</a><div class="title-cell" style="color:#9ca3af">未在前 ${R.maxPages} 页找到</div></td>
+          <td colspan="2" style="color:#9ca3af">—</td>
+          <td>${R.domain}</td>
+        </tr>`;
+      } else {
+        const oCell = rec.organic
+          ? `<span class="cell-rank ${rankClass(rec.organic.rank)}">P${rec.organic.page}-#${rec.organic.rank}</span>`
+          : '<span class="cell-miss">—</span>';
+        const aCell = rec.ad
+          ? `<span class="cell-rank ${rankClass(rec.ad.rank)}">P${rec.ad.page}-#${rec.ad.rank}</span>`
+          : '<span class="cell-miss">—</span>';
+        html += `<tr>
+          <td>${escapeHtml(kw)}</td>
+          <td>${thumbHtml(rec.image, rec.image, rec.title)}</td>
+          <td><a href="https://www.${R.domain}/dp/${a}" target="_blank">${escapeHtml(a)}</a><div class="title-cell">${escapeHtml(rec.title || '')}</div></td>
+          <td>${oCell}</td>
+          <td>${aCell}</td>
           <td>${R.domain}</td>
         </tr>`;
       }
@@ -517,21 +562,44 @@ function renderPage() {
   if (!d || d.error) { t.innerHTML = '<tr><td>无可用结果</td></tr>'; return; }
 
   const trackedSet = new Set(lastResult.asins);
-  let html = '<thead><tr><th>位次</th><th>页</th><th>自然位</th><th>综合位</th><th>ASIN</th><th>类型</th><th>追踪</th></tr></thead><tbody>';
+  let html = '<thead><tr><th>序</th><th>图</th><th>页</th><th>类型</th><th>该类位次</th><th>ASIN / 标题</th><th>追踪</th></tr></thead><tbody>';
   d.items.forEach((it, i) => {
     const tracked = trackedSet.has(it.asin);
     html += `<tr style="${tracked ? 'background:#fefce8' : ''}">
       <td>${i + 1}</td>
+      <td>${thumbHtml(it.image, it.imageLarge || it.image, it.title)}</td>
       <td>${it.page}</td>
-      <td>${it.organicRank ?? '—'}</td>
-      <td>${it.overallRank ?? '—'}</td>
-      <td><a href="https://www.${lastResult.domain}/dp/${it.asin}" target="_blank">${it.asin}</a></td>
       <td>${it.sponsored ? '<span class="badge badge-purple">广告</span>' : '<span class="badge badge-blue">自然</span>'}</td>
+      <td><span class="cell-rank ${rankClass(it.rank)}">#${it.rank}</span></td>
+      <td><a href="https://www.${lastResult.domain}/dp/${it.asin}" target="_blank">${it.asin}</a><div class="title-cell">${escapeHtml(it.title || '')}</div></td>
       <td>${tracked ? '<span class="badge badge-yellow">★</span>' : ''}</td>
     </tr>`;
   });
   html += '</tbody>';
   t.innerHTML = html;
+  bindThumbHover();
+}
+
+// ── 缩略图悬停大图预览 ───────────────────────────────────
+function bindThumbHover() {
+  const preview = document.getElementById('imgPreview');
+  document.querySelectorAll('img.thumb').forEach(img => {
+    if (img._bound) return; img._bound = true;
+    img.addEventListener('mouseenter', () => {
+      preview.src = img.dataset.full || img.src;
+      preview.style.display = 'block';
+    });
+    img.addEventListener('mousemove', e => {
+      const W = 300, H = 300, gap = 16;
+      let x = e.clientX + gap, y = e.clientY + gap;
+      if (x + W + gap > innerWidth)  x = e.clientX - W - gap;
+      if (y + H + gap > innerHeight) y = innerHeight - H - gap;
+      if (y < 0) y = 0;
+      preview.style.left = x + 'px';
+      preview.style.top  = y + 'px';
+    });
+    img.addEventListener('mouseleave', () => { preview.style.display = 'none'; });
+  });
 }
 
 function switchTab(name) {
@@ -540,56 +608,68 @@ function switchTab(name) {
 }
 
 // ── 导出 / 复制 ──────────────────────────────────────────
+function fmtCell(rec) {
+  if (!rec) return '';
+  const parts = [];
+  if (rec.organic) parts.push(`自 P${rec.organic.page}-#${rec.organic.rank}`);
+  if (rec.ad)      parts.push(`广 P${rec.ad.page}-#${rec.ad.rank}`);
+  return parts.join(' / ');
+}
+
 function exportExcel() {
   if (!lastResult) return toast('暂无结果可导出', 'warning');
   const R  = lastResult;
   const wb = XLSX.utils.book_new();
 
   // Sheet1：矩阵
-  const mat = [['关键词', ...R.asins, '命中数']];
+  const mat = [['关键词', ...R.asins, '自然命中', '广告命中']];
   for (const kw of R.keywords) {
     const d = R.data[kw];
     const row = [kw];
     if (d.error) {
       for (const _ of R.asins) row.push('ERR');
-      row.push('FAIL: ' + d.error);
+      row.push('FAIL: ' + d.error, '');
     } else {
-      let hit = 0;
+      let oHit = 0, aHit = 0;
       for (const a of R.asins) {
         const rec = d.hits[a];
-        if (!rec) { row.push(''); continue; }
-        hit++;
-        const r = rec.organicRank ?? rec.overallRank;
-        row.push(`P${rec.page}-#${r}${rec.sponsored ? ' (Ad)' : ''}`);
+        row.push(fmtCell(rec));
+        if (rec?.organic) oHit++;
+        if (rec?.ad)      aHit++;
       }
-      row.push(hit + '/' + R.asins.length);
+      row.push(oHit + '/' + R.asins.length, aHit + '/' + R.asins.length);
     }
     mat.push(row);
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mat), '矩阵');
 
-  // Sheet2：明细
-  const det = [['关键词', 'ASIN', '页码', '自然位', '综合位', '类型', '站点']];
+  // Sheet2：明细（自然位 + 广告位 + 图片URL + 标题）
+  const det = [['关键词', 'ASIN', '标题', '自然-页', '自然位', '广告-页', '广告位', '图片URL', '站点']];
   for (const kw of R.keywords) {
     const d = R.data[kw];
     if (d.error) continue;
     for (const a of R.asins) {
       const rec = d.hits[a];
-      if (!rec) det.push([kw, a, '', '', '', '未找到', R.domain]);
-      else det.push([kw, a, rec.page, rec.organicRank ?? '', rec.overallRank ?? '', rec.sponsored ? '广告' : '自然', R.domain]);
+      if (!rec) det.push([kw, a, '', '', '', '', '', '', R.domain]);
+      else det.push([
+        kw, a, rec.title || '',
+        rec.organic ? rec.organic.page : '', rec.organic ? rec.organic.rank : '',
+        rec.ad ? rec.ad.page : '', rec.ad ? rec.ad.rank : '',
+        rec.image || '', R.domain,
+      ]);
     }
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(det), '明细');
 
   // Sheet3：完整页面
-  const all = [['关键词', '位次', '页', '自然位', '综合位', 'ASIN', '类型', '追踪']];
+  const all = [['关键词', '序', '页', '类型', '该类位次', 'ASIN', '标题', '图片URL', '追踪']];
   const trackedSet = new Set(R.asins);
   for (const kw of R.keywords) {
     const d = R.data[kw];
     if (d.error) continue;
     d.items.forEach((it, i) => {
-      all.push([kw, i + 1, it.page, it.organicRank ?? '', it.overallRank ?? '', it.asin,
-        it.sponsored ? '广告' : '自然', trackedSet.has(it.asin) ? '★' : '']);
+      all.push([kw, i + 1, it.page, it.sponsored ? '广告' : '自然', it.rank, it.asin,
+        it.title || '', it.image || '', trackedSet.has(it.asin) ? '★' : '']);
     });
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(all), '完整页面');
@@ -607,10 +687,7 @@ function copyMatrix() {
     const d = R.data[kw];
     const row = [kw];
     if (d.error) for (const _ of R.asins) row.push('ERR');
-    else for (const a of R.asins) {
-      const rec = d.hits[a];
-      row.push(rec ? `P${rec.page}-#${rec.organicRank ?? rec.overallRank}${rec.sponsored ? '*' : ''}` : '');
-    }
+    else for (const a of R.asins) row.push(fmtCell(d.hits[a]));
     txt += row.join('\t') + '\n';
   }
   navigator.clipboard.writeText(txt).then(
@@ -630,7 +707,6 @@ function renderHistory() {
         <div><strong>${h.keywords.length}</strong> 关键词 × <strong>${h.asins.length}</strong> ASIN
           <span class="badge badge-blue">${h.domain}</span>
           <span class="badge badge-gray">${h.maxPages} 页</span>
-          ${h.countSponsored ? '<span class="badge badge-purple">综合位</span>' : '<span class="badge badge-green">自然位</span>'}
         </div>
         <div class="history-meta">${new Date(h.ts).toLocaleString()} · ${h.keywords.slice(0,3).join(' / ')}${h.keywords.length>3?' …':''}</div>
       </div>
@@ -644,11 +720,10 @@ function renderHistory() {
 function restoreHistory(i) {
   const h = loadHistory()[i];
   if (!h) return;
-  document.getElementById('keywords').value       = h.keywords.join('\n');
-  document.getElementById('asins').value          = h.asins.join('\n');
-  document.getElementById('domain').value         = h.domain;
-  document.getElementById('maxPages').value       = h.maxPages;
-  document.getElementById('countSponsored').value = h.countSponsored ? 'true' : 'false';
+  document.getElementById('keywords').value = h.keywords.join('\n');
+  document.getElementById('asins').value    = h.asins.join('\n');
+  document.getElementById('domain').value   = h.domain;
+  document.getElementById('maxPages').value = h.maxPages;
   toast('已恢复到输入框', 'info', 1500);
 }
 function deleteHistory(i) {
@@ -667,6 +742,11 @@ function clearHistory() {
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+function escapeAttr(s) {
+  return String(s ?? '').replace(/[&"<>]/g, c => ({
+    '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;'
   }[c]));
 }
 

@@ -94,7 +94,6 @@ async function handleQuery(request) {
   const keywords = (body.keywords || []).map(s => String(s || '').trim()).filter(Boolean);
   const asins    = (body.asins   || []).map(s => String(s || '').trim().toUpperCase()).filter(Boolean);
   const maxPages = Math.max(1, Math.min(7, parseInt(body.maxPages, 10) || 3));
-  const countSponsored = !!body.countSponsored;
 
   if (!keywords.length) return cors(JSON.stringify({ success: false, message: '关键词为空' }), 400);
   if (!/^amazon\.[a-z.]+$/.test(domain)) return cors(JSON.stringify({ success: false, message: '非法域名' }), 400);
@@ -102,7 +101,7 @@ async function handleQuery(request) {
   const data = {};
   for (const kw of keywords) {
     try {
-      data[kw] = await scanKeyword(domain, kw, asins, maxPages, countSponsored);
+      data[kw] = await scanKeyword(domain, kw, asins, maxPages);
     } catch (e) {
       data[kw] = { error: e.message || String(e), items: [], hits: {} };
     }
@@ -110,9 +109,9 @@ async function handleQuery(request) {
   return cors(JSON.stringify({ success: true, data }), 200);
 }
 
-async function scanKeyword(domain, keyword, asins, maxPages, countSponsored) {
+async function scanKeyword(domain, keyword, asins, maxPages) {
   const items = [];
-  let organicCounter = 0, sponsoredCounter = 0, scannedPages = 0;
+  let organicCounter = 0, adCounter = 0, scannedPages = 0;
 
   for (let page = 1; page <= maxPages; page++) {
     const html = await fetchSearchPage(domain, keyword, page);
@@ -125,36 +124,35 @@ async function scanKeyword(domain, keyword, asins, maxPages, countSponsored) {
     if (!parsed.length) break;
 
     for (const it of parsed) {
-      if (it.sponsored) sponsoredCounter++;
-      else organicCounter++;
-
-      const overallRank = countSponsored
-        ? (organicCounter + sponsoredCounter)
-        : (it.sponsored ? null : organicCounter);
-
+      let rank;
+      if (it.sponsored) { adCounter++;      rank = adCounter; }
+      else              { organicCounter++; rank = organicCounter; }
       items.push({
-        asin:        it.asin,
-        organicRank: it.sponsored ? null : organicCounter,
-        overallRank,
+        asin:       it.asin,
+        sponsored:  it.sponsored,
+        rank,                 // 当前类型内的序号（自然 / 广告各自计数）
         page,
-        sponsored:   it.sponsored,
+        image:      it.image,
+        imageLarge: it.imageLarge,
+        title:      it.title,
       });
     }
   }
 
+  // 每个 ASIN 同时记录"首次出现的自然位"和"首次出现的广告位"
   const hits = {};
   const asinSet = new Set(asins);
   for (const it of items) {
-    if (asinSet.has(it.asin) && !hits[it.asin]) {
-      hits[it.asin] = {
-        organicRank: it.organicRank,
-        overallRank: it.overallRank,
-        page:        it.page,
-        sponsored:   it.sponsored,
-      };
+    if (!asinSet.has(it.asin)) continue;
+    if (!hits[it.asin]) hits[it.asin] = { organic: null, ad: null, image: null, title: null };
+    const slot = it.sponsored ? 'ad' : 'organic';
+    if (!hits[it.asin][slot]) {
+      hits[it.asin][slot] = { rank: it.rank, page: it.page };
     }
+    if (!hits[it.asin].image && it.image) hits[it.asin].image = it.image;
+    if (!hits[it.asin].title && it.title) hits[it.asin].title = it.title;
   }
-  return { totalOrganic: organicCounter, totalSponsored: sponsoredCounter, scannedPages, items, hits };
+  return { totalOrganic: organicCounter, totalAd: adCounter, scannedPages, items, hits };
 }
 
 async function fetchSearchPage(domain, keyword, page) {
@@ -204,9 +202,35 @@ function parseHtml(html) {
       /aria-label="[^"]*Sponsored/i.test(chunk) ||
       />\s*Sponsored\s*</i.test(chunk) ||
       /AdHolder|sp_atf|sp_btf|sp_search_thematic|s-result-item-ad/i.test(chunk);
-    items.push({ asin: b.asin, sponsored });
+
+    // 提取产品图（s-image 类，src 属性顺序两种都尝试）
+    let img =
+      (chunk.match(/<img[^>]*?\bclass="[^"]*\bs-image\b[^"]*"[^>]*?\bsrc="([^"]+)"/i) || [])[1] ||
+      (chunk.match(/<img[^>]*?\bsrc="([^"]+)"[^>]*?\bclass="[^"]*\bs-image\b/i) || [])[1] ||
+      null;
+    // 标准化为更高分辨率（缩略图通常是 _UL320_，悬停大图想要更清晰）
+    let imgLarge = img ? img.replace(/\._[A-Z0-9_,]+_\.(jpg|png|webp)/i, '._AC_SL480_.$1') : null;
+
+    // 提取标题：h2 内首个 span 文本
+    let title = null;
+    const tm = chunk.match(/<h2[^>]*>[\s\S]*?<span[^>]*>([^<]{2,300})<\/span>/);
+    if (tm) title = decodeEntities(tm[1].trim());
+
+    items.push({ asin: b.asin, sponsored, image: img, imageLarge: imgLarge, title });
   }
   return items;
+}
+
+function decodeEntities(s) {
+  return String(s)
+    .replace(/&amp;/g,  '&')
+    .replace(/&lt;/g,   '<')
+    .replace(/&gt;/g,   '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g,  "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g,    (_, n) => String.fromCharCode(+n))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
 }
 
 function cors(body, status = 200) {
