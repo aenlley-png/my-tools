@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>亚马逊关键词排名查询工具</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Microsoft YaHei',Arial,sans-serif;background:#f0f4f8;color:#333;font-size:14px;min-height:100vh}
+
+.header{background:linear-gradient(135deg,#1a3c5e,#2563a8);color:#fff;padding:14px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.header h1{font-size:18px;font-weight:700}
+.header-sub{font-size:11px;opacity:.75;margin-top:2px}
+.header-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+
+.content{padding:20px;max-width:1600px;margin:0 auto}
+.card{background:#fff;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.07);padding:18px;margin-bottom:16px}
+.card-title{font-size:15px;font-weight:600;color:#1a3c5e;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #eaeef5;display:flex;align-items:center;gap:8px}
+.card-title span{font-weight:400;font-size:12px;color:#888}
+
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;transition:.2s;white-space:nowrap}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:#2563a8;color:#fff}.btn-primary:hover:not(:disabled){background:#1d4f8a}
+.btn-success{background:#16a34a;color:#fff}.btn-success:hover:not(:disabled){background:#15803d}
+.btn-warning{background:#d97706;color:#fff}.btn-warning:hover:not(:disabled){background:#b45309}
+.btn-danger{background:#dc2626;color:#fff}.btn-danger:hover:not(:disabled){background:#b91c1c}
+.btn-secondary{background:#4b5563;color:#fff}.btn-secondary:hover:not(:disabled){background:#374151}
+.btn-outline{background:#fff;border:1px solid #2563a8;color:#2563a8}.btn-outline:hover:not(:disabled){background:#eff6ff}
+.btn-ghost{background:transparent;color:#555;border:1px solid #dde4ee}.btn-ghost:hover{background:#f5f8ff}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+.form-group{margin-bottom:14px}
+.form-label{display:block;font-weight:500;margin-bottom:5px;color:#374151;font-size:13px}
+.form-label .hint{font-weight:400;color:#9ca3af;font-size:11px;margin-left:4px}
+.form-control{width:100%;padding:7px 11px;border:1px solid #d1d9e6;border-radius:6px;font-size:13px;background:#fff;transition:.2s}
+.form-control:focus{outline:none;border-color:#2563a8;box-shadow:0 0 0 3px rgba(37,99,168,.1)}
+textarea.form-control{resize:vertical;font-family:'Consolas','Courier New',monospace;min-height:120px}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+@media(max-width:900px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}.content{padding:12px}}
+
+.tbl-wrap{overflow:auto;max-height:60vh;border:1px solid #eaeef5;border-radius:6px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#f0f4f8;color:#1a3c5e;font-weight:600;padding:9px 11px;text-align:left;border-bottom:2px solid #dde4ee;white-space:nowrap;position:sticky;top:0;z-index:5}
+td{padding:8px 11px;border-bottom:1px solid #edf0f6;vertical-align:middle}
+tr:hover td{background:#f8fbff}
+
+.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:600}
+.badge-blue{background:#dbeafe;color:#1e40af}
+.badge-green{background:#dcfce7;color:#166534}
+.badge-yellow{background:#fef3c7;color:#92400e}
+.badge-red{background:#fee2e2;color:#991b1b}
+.badge-gray{background:#f3f4f6;color:#374151}
+.badge-purple{background:#ede9fe;color:#5b21b6}
+
+.stat-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.stat{background:#fff;border:1px solid #eaeef5;border-radius:8px;padding:10px 14px;min-width:130px;flex:1}
+.stat-label{font-size:11px;color:#9ca3af;margin-bottom:3px}
+.stat-value{font-size:18px;font-weight:700;color:#1a3c5e}
+
+.toast-box{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{padding:10px 16px;border-radius:6px;color:#fff;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.15);animation:slide-in .25s ease-out}
+.toast-success{background:#16a34a}
+.toast-error{background:#dc2626}
+.toast-info{background:#2563a8}
+.toast-warning{background:#d97706}
+@keyframes slide-in{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+.progress{height:6px;background:#eaeef5;border-radius:3px;overflow:hidden;margin-top:6px}
+.progress-bar{height:100%;background:linear-gradient(90deg,#2563a8,#16a34a);transition:width .25s}
+
+.history-row{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px solid #edf0f6;font-size:12px}
+.history-row:last-child{border-bottom:none}
+.history-row:hover{background:#f8fbff}
+.history-meta{color:#9ca3af;font-size:11px;margin-top:2px}
+
+.cell-rank{font-weight:700}
+.cell-rank-top{color:#16a34a}      /* rank ≤ 10 */
+.cell-rank-mid{color:#2563a8}      /* rank ≤ 30 */
+.cell-rank-low{color:#d97706}      /* rank > 30 */
+.cell-miss{color:#9ca3af;font-size:11px}
+
+.tabs{display:flex;gap:4px;border-bottom:1px solid #eaeef5;margin-bottom:14px}
+.tab{padding:8px 16px;font-size:13px;color:#555;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.2s}
+.tab:hover{color:#2563a8}
+.tab.active{color:#2563a8;border-bottom-color:#2563a8;font-weight:600}
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+.kbd{display:inline-block;padding:1px 6px;background:#f3f4f6;border:1px solid #d1d9e6;border-radius:3px;font-family:monospace;font-size:11px;color:#555}
+</style>
+</head>
+<body>
+
+<div class="toast-box" id="toastBox"></div>
+
+<div class="header">
+  <div>
+    <h1>🔍 亚马逊关键词排名查询</h1>
+    <div class="header-sub">批量查询 ASIN 在指定关键词下的搜索排名（自然位 / 广告位）</div>
+  </div>
+  <div class="header-actions">
+    <span id="apiStatus" class="badge badge-gray">代理：未配置</span>
+    <button class="btn btn-ghost btn-sm" onclick="openSettings()">⚙️ 设置</button>
+  </div>
+</div>
+
+<div class="content">
+
+  <!-- 配置区 -->
+  <div class="card" id="settingsCard" style="display:none">
+    <div class="card-title">⚙️ 代理设置</div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">中转代理 URL <span class="hint">部署 keyword-rank-worker.js 后填入 Worker URL</span></label>
+        <input type="url" id="proxyUrl" class="form-control" placeholder="https://xxx.workers.dev">
+      </div>
+      <div class="form-group">
+        <label class="form-label">默认站点</label>
+        <select id="defaultDomain" class="form-control">
+          <option value="amazon.com">amazon.com（美国）</option>
+          <option value="amazon.ca">amazon.ca（加拿大）</option>
+          <option value="amazon.com.mx">amazon.com.mx（墨西哥）</option>
+          <option value="amazon.co.uk">amazon.co.uk（英国）</option>
+          <option value="amazon.de">amazon.de（德国）</option>
+          <option value="amazon.fr">amazon.fr（法国）</option>
+          <option value="amazon.it">amazon.it（意大利）</option>
+          <option value="amazon.es">amazon.es（西班牙）</option>
+          <option value="amazon.co.jp">amazon.co.jp（日本）</option>
+          <option value="amazon.com.au">amazon.com.au（澳大利亚）</option>
+          <option value="amazon.in">amazon.in（印度）</option>
+          <option value="amazon.ae">amazon.ae（阿联酋）</option>
+          <option value="amazon.sa">amazon.sa（沙特）</option>
+          <option value="amazon.sg">amazon.sg（新加坡）</option>
+          <option value="amazon.nl">amazon.nl（荷兰）</option>
+          <option value="amazon.se">amazon.se（瑞典）</option>
+          <option value="amazon.pl">amazon.pl（波兰）</option>
+          <option value="amazon.com.br">amazon.com.br（巴西）</option>
+          <option value="amazon.com.tr">amazon.com.tr（土耳其）</option>
+        </select>
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" onclick="saveSettings()">💾 保存</button>
+      <button class="btn btn-ghost" onclick="testProxy()">🔌 测试连接</button>
+      <button class="btn btn-ghost" onclick="closeSettings()">取消</button>
+    </div>
+  </div>
+
+  <!-- 输入区 -->
+  <div class="card">
+    <div class="card-title">📝 查询输入</div>
+    <div class="grid-3">
+      <div class="form-group">
+        <label class="form-label">站点</label>
+        <select id="domain" class="form-control"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">扫描页数 <span class="hint">1-7，每页约 48 个自然位</span></label>
+        <input type="number" id="maxPages" class="form-control" value="3" min="1" max="7">
+      </div>
+      <div class="form-group">
+        <label class="form-label">广告位计入排名</label>
+        <select id="countSponsored" class="form-control">
+          <option value="false">否（仅自然位）</option>
+          <option value="true">是（综合位次）</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">关键词 <span class="hint">每行一个</span></label>
+        <textarea id="keywords" class="form-control" placeholder="wireless earbuds&#10;bluetooth headphones&#10;noise cancelling earbuds"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">ASIN <span class="hint">每行一个，10 位字符</span></label>
+        <textarea id="asins" class="form-control" placeholder="B0XXXXXXXX&#10;B0YYYYYYYY"></textarea>
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="btnQuery" onclick="runQuery()">🔍 开始查询</button>
+      <button class="btn btn-ghost" onclick="loadDemo()">🎯 示例数据</button>
+      <button class="btn btn-ghost" onclick="clearInputs()">🗑️ 清空</button>
+      <span id="progressText" style="margin-left:auto;font-size:12px;color:#666"></span>
+    </div>
+    <div class="progress" id="progressWrap" style="display:none"><div class="progress-bar" id="progressBar" style="width:0"></div></div>
+  </div>
+
+  <!-- 结果区 -->
+  <div class="card" id="resultCard" style="display:none">
+    <div class="card-title">
+      📊 查询结果
+      <span id="resultMeta"></span>
+      <div style="margin-left:auto" class="btn-group">
+        <button class="btn btn-success btn-sm" onclick="exportExcel()">📥 导出 Excel</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyMatrix()">📋 复制矩阵</button>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="matrix" onclick="switchTab('matrix')">矩阵视图</div>
+      <div class="tab" data-tab="detail" onclick="switchTab('detail')">明细视图</div>
+      <div class="tab" data-tab="page" onclick="switchTab('page')">完整页面 (Top N)</div>
+    </div>
+
+    <div class="stat-row" id="statRow"></div>
+
+    <div class="tab-pane active" id="pane-matrix">
+      <div class="tbl-wrap"><table id="matrixTbl"></table></div>
+    </div>
+    <div class="tab-pane" id="pane-detail">
+      <div class="tbl-wrap"><table id="detailTbl"></table></div>
+    </div>
+    <div class="tab-pane" id="pane-page">
+      <div class="form-group" style="margin:0 0 12px">
+        <label class="form-label">查看关键词的完整搜索结果</label>
+        <select id="pageKwSelect" class="form-control" onchange="renderPage()"></select>
+      </div>
+      <div class="tbl-wrap"><table id="pageTbl"></table></div>
+    </div>
+  </div>
+
+  <!-- 历史记录 -->
+  <div class="card">
+    <div class="card-title">
+      🕘 查询历史
+      <span>最近 30 条，点击可恢复输入</span>
+      <div style="margin-left:auto" class="btn-group">
+        <button class="btn btn-ghost btn-sm" onclick="clearHistory()">🗑️ 清空</button>
+      </div>
+    </div>
+    <div id="historyList" style="font-size:12px;color:#9ca3af">暂无历史</div>
+  </div>
+
+</div>
+
+<script>
+// ── 配置 & 存储 ───────────────────────────────────────────
+const LS_KEY = 'kwrank.settings.v1';
+const LS_HIS = 'kwrank.history.v1';
+let settings = { proxyUrl: '', defaultDomain: 'amazon.com' };
+let lastResult = null;   // 最近一次完整结果
+
+function loadSettings() {
+  try { settings = { ...settings, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}') }; } catch {}
+  updateApiStatus();
+}
+function persistSettings() { localStorage.setItem(LS_KEY, JSON.stringify(settings)); }
+
+function loadHistory() { try { return JSON.parse(localStorage.getItem(LS_HIS) || '[]'); } catch { return []; } }
+function saveHistory(arr) { localStorage.setItem(LS_HIS, JSON.stringify(arr.slice(0, 30))); }
+function pushHistory(entry) {
+  const arr = loadHistory();
+  arr.unshift(entry);
+  saveHistory(arr);
+  renderHistory();
+}
+
+// ── UI: 设置 ─────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('proxyUrl').value      = settings.proxyUrl || '';
+  document.getElementById('defaultDomain').value = settings.defaultDomain || 'amazon.com';
+  document.getElementById('settingsCard').style.display = 'block';
+}
+function closeSettings() {
+  document.getElementById('settingsCard').style.display = 'none';
+}
+function saveSettings() {
+  settings.proxyUrl      = document.getElementById('proxyUrl').value.trim().replace(/\/+$/, '');
+  settings.defaultDomain = document.getElementById('defaultDomain').value;
+  persistSettings();
+  populateDomainSelect();
+  closeSettings();
+  updateApiStatus();
+  toast('设置已保存', 'success');
+}
+async function testProxy() {
+  const url = document.getElementById('proxyUrl').value.trim().replace(/\/+$/, '');
+  if (!url) return toast('请先填入代理 URL', 'warning');
+  try {
+    const r = await fetch(url, { method: 'GET' });
+    const j = await r.json();
+    if (j.ok) toast('代理连通 ✓', 'success');
+    else toast('代理响应异常', 'error');
+  } catch (e) {
+    toast('连接失败：' + e.message, 'error');
+  }
+}
+function updateApiStatus() {
+  const el = document.getElementById('apiStatus');
+  if (settings.proxyUrl) {
+    el.className = 'badge badge-green';
+    el.textContent = '代理：已配置';
+    el.title = settings.proxyUrl;
+  } else {
+    el.className = 'badge badge-gray';
+    el.textContent = '代理：未配置';
+    el.title = '';
+  }
+}
+
+function populateDomainSelect() {
+  const sel  = document.getElementById('domain');
+  const opts = document.getElementById('defaultDomain').innerHTML;
+  if (!sel.options.length) sel.innerHTML = opts;
+  sel.value = settings.defaultDomain || 'amazon.com';
+}
+
+// ── UI: Toast ────────────────────────────────────────────
+function toast(msg, type = 'info', ms = 3000) {
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  document.getElementById('toastBox').appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
+
+// ── 输入辅助 ─────────────────────────────────────────────
+function loadDemo() {
+  document.getElementById('keywords').value = 'wireless earbuds\nbluetooth headphones\nnoise cancelling earbuds';
+  document.getElementById('asins').value    = 'B09JQMJHXY\nB0863TXGM3\nB0BDHB9Y8H';
+  toast('已填充示例', 'info', 1500);
+}
+function clearInputs() {
+  document.getElementById('keywords').value = '';
+  document.getElementById('asins').value    = '';
+}
+
+function parseLines(s) {
+  return (s || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+}
+function uniq(arr) { return [...new Set(arr)]; }
+
+// ── 主查询 ───────────────────────────────────────────────
+async function runQuery() {
+  if (!settings.proxyUrl) {
+    toast('请先在设置中填入代理 URL', 'warning');
+    openSettings();
+    return;
+  }
+  const keywords = uniq(parseLines(document.getElementById('keywords').value));
+  const asinsRaw = uniq(parseLines(document.getElementById('asins').value).map(s => s.toUpperCase()));
+  const asins    = asinsRaw.filter(s => /^[A-Z0-9]{10}$/.test(s));
+  const invalidAsins = asinsRaw.filter(s => !/^[A-Z0-9]{10}$/.test(s));
+
+  if (!keywords.length) return toast('请至少输入 1 个关键词', 'warning');
+  if (!asinsRaw.length) return toast('请至少输入 1 个 ASIN', 'warning');
+  if (invalidAsins.length) toast('忽略 ' + invalidAsins.length + ' 个非法 ASIN', 'warning');
+  if (!asins.length)    return toast('未找到合法 ASIN（应为 10 位大写字母/数字）', 'error');
+
+  const domain         = document.getElementById('domain').value;
+  const maxPages       = parseInt(document.getElementById('maxPages').value, 10) || 3;
+  const countSponsored = document.getElementById('countSponsored').value === 'true';
+
+  const btn = document.getElementById('btnQuery');
+  btn.disabled = true; btn.textContent = '⏳ 查询中…';
+  setProgress(0, '准备请求…');
+
+  const t0 = Date.now();
+  let resp;
+  try {
+    setProgress(10, '联机代理…（耗时取决于关键词数 × 页数）');
+    const r = await fetch(settings.proxyUrl, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ domain, keywords, asins, maxPages, countSponsored }),
+    });
+    setProgress(80, '解析结果…');
+    resp = await r.json();
+    if (!r.ok || !resp.success) throw new Error(resp.message || ('HTTP ' + r.status));
+  } catch (e) {
+    toast('查询失败：' + e.message, 'error', 5000);
+    btn.disabled = false; btn.textContent = '🔍 开始查询';
+    setProgress(0, '');
+    return;
+  }
+  setProgress(100, '完成 (' + ((Date.now() - t0) / 1000).toFixed(1) + 's)');
+
+  lastResult = { domain, keywords, asins, maxPages, countSponsored, data: resp.data, ts: Date.now() };
+  pushHistory({
+    ts: lastResult.ts, domain, maxPages, countSponsored,
+    keywords, asins,
+  });
+  renderResult(lastResult);
+
+  btn.disabled = false; btn.textContent = '🔍 开始查询';
+  setTimeout(() => setProgress(0, ''), 1500);
+}
+
+function setProgress(pct, txt) {
+  document.getElementById('progressWrap').style.display = pct ? 'block' : 'none';
+  document.getElementById('progressBar').style.width    = pct + '%';
+  document.getElementById('progressText').textContent   = txt || '';
+}
+
+// ── 渲染：矩阵 / 明细 / 页面 / 统计 ───────────────────────
+function renderResult(R) {
+  document.getElementById('resultCard').style.display = 'block';
+
+  const errorKws = Object.keys(R.data).filter(k => R.data[k].error);
+  const okKws    = Object.keys(R.data).filter(k => !R.data[k].error);
+
+  document.getElementById('resultMeta').textContent =
+    ` · 站点 ${R.domain} · ${R.keywords.length} 关键词 × ${R.asins.length} ASIN · ` +
+    `${R.maxPages} 页 · ${R.countSponsored ? '综合位' : '自然位'}` +
+    (errorKws.length ? ` · ${errorKws.length} 个失败` : '');
+
+  // 顶部统计
+  let totalHits = 0, totalChecks = R.keywords.length * R.asins.length;
+  for (const kw of okKws) {
+    for (const asin of R.asins) {
+      if (R.data[kw].hits[asin]) totalHits++;
+    }
+  }
+  const stat = document.getElementById('statRow');
+  stat.innerHTML = `
+    <div class="stat"><div class="stat-label">总组合数</div><div class="stat-value">${totalChecks}</div></div>
+    <div class="stat"><div class="stat-label">命中数</div><div class="stat-value" style="color:#16a34a">${totalHits}</div></div>
+    <div class="stat"><div class="stat-label">未命中</div><div class="stat-value" style="color:#9ca3af">${totalChecks - totalHits}</div></div>
+    <div class="stat"><div class="stat-label">命中率</div><div class="stat-value">${totalChecks ? ((totalHits/totalChecks)*100).toFixed(1) : 0}%</div></div>
+    <div class="stat"><div class="stat-label">失败关键词</div><div class="stat-value" style="color:${errorKws.length?'#dc2626':'#9ca3af'}">${errorKws.length}</div></div>
+  `;
+
+  renderMatrix(R);
+  renderDetail(R);
+
+  // 页面视图选项
+  const psel = document.getElementById('pageKwSelect');
+  psel.innerHTML = okKws.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
+  if (okKws.length) renderPage();
+}
+
+function rankCell(rec) {
+  if (!rec) return '<span class="cell-miss">—</span>';
+  const r = rec.organicRank ?? rec.overallRank;
+  if (r == null) return '<span class="cell-miss">—</span>';
+  const cls = r <= 10 ? 'cell-rank-top' : r <= 30 ? 'cell-rank-mid' : 'cell-rank-low';
+  const tag = rec.sponsored ? ' <span class="badge badge-purple" style="margin-left:4px">广告</span>' : '';
+  return `<span class="cell-rank ${cls}">P${rec.page}-#${r}</span>${tag}`;
+}
+
+function renderMatrix(R) {
+  const t = document.getElementById('matrixTbl');
+  let html = '<thead><tr><th>关键词</th>';
+  for (const a of R.asins) html += `<th>${escapeHtml(a)}</th>`;
+  html += '<th>状态</th></tr></thead><tbody>';
+
+  for (const kw of R.keywords) {
+    const d = R.data[kw];
+    html += `<tr><td><strong>${escapeHtml(kw)}</strong></td>`;
+    if (d.error) {
+      html += `<td colspan="${R.asins.length}" style="color:#dc2626">${escapeHtml(d.error)}</td>`;
+      html += '<td><span class="badge badge-red">失败</span></td>';
+    } else {
+      for (const a of R.asins) html += '<td>' + rankCell(d.hits[a]) + '</td>';
+      const hitCnt = R.asins.filter(a => d.hits[a]).length;
+      html += `<td><span class="badge badge-${hitCnt ? 'green' : 'gray'}">${hitCnt}/${R.asins.length}</span></td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody>';
+  t.innerHTML = html;
+}
+
+function renderDetail(R) {
+  const t = document.getElementById('detailTbl');
+  let html = '<thead><tr><th>关键词</th><th>ASIN</th><th>页码</th><th>自然位</th><th>综合位</th><th>类型</th><th>站点</th></tr></thead><tbody>';
+  for (const kw of R.keywords) {
+    const d = R.data[kw];
+    if (d.error) continue;
+    for (const a of R.asins) {
+      const rec = d.hits[a];
+      if (!rec) {
+        html += `<tr><td>${escapeHtml(kw)}</td><td>${escapeHtml(a)}</td><td colspan="4" style="color:#9ca3af">未在前 ${R.maxPages} 页找到</td><td>${R.domain}</td></tr>`;
+      } else {
+        const cls = (rec.organicRank ?? rec.overallRank) <= 10 ? 'cell-rank-top'
+                  : (rec.organicRank ?? rec.overallRank) <= 30 ? 'cell-rank-mid' : 'cell-rank-low';
+        html += `<tr>
+          <td>${escapeHtml(kw)}</td>
+          <td><a href="https://www.${R.domain}/dp/${a}" target="_blank">${escapeHtml(a)}</a></td>
+          <td>${rec.page}</td>
+          <td class="${cls}"><strong>${rec.organicRank ?? '—'}</strong></td>
+          <td><strong>${rec.overallRank ?? '—'}</strong></td>
+          <td>${rec.sponsored ? '<span class="badge badge-purple">广告</span>' : '<span class="badge badge-blue">自然</span>'}</td>
+          <td>${R.domain}</td>
+        </tr>`;
+      }
+    }
+  }
+  html += '</tbody>';
+  t.innerHTML = html;
+}
+
+function renderPage() {
+  const kw = document.getElementById('pageKwSelect').value;
+  if (!kw || !lastResult) return;
+  const d  = lastResult.data[kw];
+  const t  = document.getElementById('pageTbl');
+  if (!d || d.error) { t.innerHTML = '<tr><td>无可用结果</td></tr>'; return; }
+
+  const trackedSet = new Set(lastResult.asins);
+  let html = '<thead><tr><th>位次</th><th>页</th><th>自然位</th><th>综合位</th><th>ASIN</th><th>类型</th><th>追踪</th></tr></thead><tbody>';
+  d.items.forEach((it, i) => {
+    const tracked = trackedSet.has(it.asin);
+    html += `<tr style="${tracked ? 'background:#fefce8' : ''}">
+      <td>${i + 1}</td>
+      <td>${it.page}</td>
+      <td>${it.organicRank ?? '—'}</td>
+      <td>${it.overallRank ?? '—'}</td>
+      <td><a href="https://www.${lastResult.domain}/dp/${it.asin}" target="_blank">${it.asin}</a></td>
+      <td>${it.sponsored ? '<span class="badge badge-purple">广告</span>' : '<span class="badge badge-blue">自然</span>'}</td>
+      <td>${tracked ? '<span class="badge badge-yellow">★</span>' : ''}</td>
+    </tr>`;
+  });
+  html += '</tbody>';
+  t.innerHTML = html;
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
+}
+
+// ── 导出 / 复制 ──────────────────────────────────────────
+function exportExcel() {
+  if (!lastResult) return toast('暂无结果可导出', 'warning');
+  const R  = lastResult;
+  const wb = XLSX.utils.book_new();
+
+  // Sheet1：矩阵
+  const mat = [['关键词', ...R.asins, '命中数']];
+  for (const kw of R.keywords) {
+    const d = R.data[kw];
+    const row = [kw];
+    if (d.error) {
+      for (const _ of R.asins) row.push('ERR');
+      row.push('FAIL: ' + d.error);
+    } else {
+      let hit = 0;
+      for (const a of R.asins) {
+        const rec = d.hits[a];
+        if (!rec) { row.push(''); continue; }
+        hit++;
+        const r = rec.organicRank ?? rec.overallRank;
+        row.push(`P${rec.page}-#${r}${rec.sponsored ? ' (Ad)' : ''}`);
+      }
+      row.push(hit + '/' + R.asins.length);
+    }
+    mat.push(row);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mat), '矩阵');
+
+  // Sheet2：明细
+  const det = [['关键词', 'ASIN', '页码', '自然位', '综合位', '类型', '站点']];
+  for (const kw of R.keywords) {
+    const d = R.data[kw];
+    if (d.error) continue;
+    for (const a of R.asins) {
+      const rec = d.hits[a];
+      if (!rec) det.push([kw, a, '', '', '', '未找到', R.domain]);
+      else det.push([kw, a, rec.page, rec.organicRank ?? '', rec.overallRank ?? '', rec.sponsored ? '广告' : '自然', R.domain]);
+    }
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(det), '明细');
+
+  // Sheet3：完整页面
+  const all = [['关键词', '位次', '页', '自然位', '综合位', 'ASIN', '类型', '追踪']];
+  const trackedSet = new Set(R.asins);
+  for (const kw of R.keywords) {
+    const d = R.data[kw];
+    if (d.error) continue;
+    d.items.forEach((it, i) => {
+      all.push([kw, i + 1, it.page, it.organicRank ?? '', it.overallRank ?? '', it.asin,
+        it.sponsored ? '广告' : '自然', trackedSet.has(it.asin) ? '★' : '']);
+    });
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(all), '完整页面');
+
+  const fname = `keyword-rank-${R.domain}-${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, fname);
+  toast('已导出 ' + fname, 'success');
+}
+
+function copyMatrix() {
+  if (!lastResult) return toast('暂无结果', 'warning');
+  const R = lastResult;
+  let txt = ['关键词', ...R.asins].join('\t') + '\n';
+  for (const kw of R.keywords) {
+    const d = R.data[kw];
+    const row = [kw];
+    if (d.error) for (const _ of R.asins) row.push('ERR');
+    else for (const a of R.asins) {
+      const rec = d.hits[a];
+      row.push(rec ? `P${rec.page}-#${rec.organicRank ?? rec.overallRank}${rec.sponsored ? '*' : ''}` : '');
+    }
+    txt += row.join('\t') + '\n';
+  }
+  navigator.clipboard.writeText(txt).then(
+    () => toast('矩阵已复制（可粘贴到 Excel）', 'success'),
+    () => toast('复制失败', 'error')
+  );
+}
+
+// ── 历史记录 ─────────────────────────────────────────────
+function renderHistory() {
+  const list = loadHistory();
+  const el   = document.getElementById('historyList');
+  if (!list.length) { el.innerHTML = '<div style="padding:8px;color:#9ca3af">暂无历史</div>'; return; }
+  el.innerHTML = list.map((h, i) => `
+    <div class="history-row">
+      <div>
+        <div><strong>${h.keywords.length}</strong> 关键词 × <strong>${h.asins.length}</strong> ASIN
+          <span class="badge badge-blue">${h.domain}</span>
+          <span class="badge badge-gray">${h.maxPages} 页</span>
+          ${h.countSponsored ? '<span class="badge badge-purple">综合位</span>' : '<span class="badge badge-green">自然位</span>'}
+        </div>
+        <div class="history-meta">${new Date(h.ts).toLocaleString()} · ${h.keywords.slice(0,3).join(' / ')}${h.keywords.length>3?' …':''}</div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-ghost btn-sm" onclick="restoreHistory(${i})">↻ 恢复</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteHistory(${i})">✕</button>
+      </div>
+    </div>
+  `).join('');
+}
+function restoreHistory(i) {
+  const h = loadHistory()[i];
+  if (!h) return;
+  document.getElementById('keywords').value       = h.keywords.join('\n');
+  document.getElementById('asins').value          = h.asins.join('\n');
+  document.getElementById('domain').value         = h.domain;
+  document.getElementById('maxPages').value       = h.maxPages;
+  document.getElementById('countSponsored').value = h.countSponsored ? 'true' : 'false';
+  toast('已恢复到输入框', 'info', 1500);
+}
+function deleteHistory(i) {
+  const arr = loadHistory();
+  arr.splice(i, 1);
+  saveHistory(arr);
+  renderHistory();
+}
+function clearHistory() {
+  if (!confirm('确定清空所有历史？')) return;
+  saveHistory([]);
+  renderHistory();
+}
+
+// ── Utils ────────────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// ── Init ─────────────────────────────────────────────────
+loadSettings();
+populateDomainSelect();
+renderHistory();
+</script>
+</body>
+</html>
