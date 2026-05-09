@@ -1,0 +1,36 @@
+name: Deploy keyword-rank Worker
+
+on:
+  push:
+    branches:
+      - claude/amazon-keyword-ranking-tool-4mwwy
+      - main
+    paths:
+      - keyword-rank.html
+      - keyword-rank-worker.js
+      - keyword-rank-html.js
+      - build-html.js
+      - wrangler.kw.toml
+      - .github/workflows/deploy-kw.yml
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Build & deploy to Cloudflare Workers
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Rebuild HTML embed (keyword-rank-html.js)
+        run: node build-html.js
+
+      - name: Deploy with Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          configPath: wrangler.kw.toml
+          command: deploy
