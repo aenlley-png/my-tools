@@ -1,12 +1,12 @@
 status: success
-run_id: 25623505199
-run_url: https://github.com/aenlley-png/my-tools/actions/runs/25623505199
-trigger_sha: 39ec1b755d021e27dc258b5316f4dbcc2325441c
+run_id: 25623715589
+run_url: https://github.com/aenlley-png/my-tools/actions/runs/25623715589
+trigger_sha: a6685369b3f4a11d6542c9d8a4a6ec1b5f6a7220
 actor: aenlley-png
-started_at: 2026-05-10T08:00:36Z
+started_at: 2026-05-10T08:11:05Z
 ---
 ── DEPLOY_INFO ──
-deployed_at:  2026-05-10T08:00:34Z
+deployed_at:  2026-05-10T08:11:04Z
 worker_url:   https://anomaly-detector.tinastocks.workers.dev
 db_name:      anomaly-db
 db_id:        734603b4-6b32-46ea-bb58-10b67e004af2
@@ -16,32 +16,8 @@ plugin_zip:   dist/v5-stock-plugin.zip
 ---
 ── deploy log (last 100 lines) ──
 ── 1) 准备 D1 数据库 ──
-创建 D1 anomaly-db
-
- ⛅️ wrangler 4.86.0
-───────────────────
-✅ Successfully created DB 'anomaly-db' in region WNAM
-Created your new D1 database.
-
-To access your new D1 Database in your Worker, add the following snippet to your configuration file:
-[[d1_databases]]
-binding = "anomaly_db"
-database_name = "anomaly-db"
-database_id = "734603b4-6b32-46ea-bb58-10b67e004af2"
 D1 id: 734603b4-6b32-46ea-bb58-10b67e004af2
 ── 2) 准备 KV 命名空间 ──
-创建 KV anomaly-cache
-
- ⛅️ wrangler 4.86.0 (update available 4.90.0)
-─────────────────────────────────────────────
-Resource location: remote 
-
-🌀 Creating namespace with title "anomaly-cache"
-✨ Success!
-To access your new KV Namespace in your Worker, add the following snippet to your configuration file:
-[[kv_namespaces]]
-binding = "anomaly_cache"
-id = "b0bcde3d2767416ba0668702c8e95bb0"
 KV id: b0bcde3d2767416ba0668702c8e95bb0
 ── 3) 写入 wrangler-anomaly.toml ──
   database_id → 734603b4-6b32-46ea-bb58-10b67e004af2
@@ -53,15 +29,15 @@ KV id: b0bcde3d2767416ba0668702c8e95bb0
       "served_by_colo": "LAX",
       "served_by_primary": true,
       "timings": {
-        "sql_duration_ms": 5.7773
+        "sql_duration_ms": 3.1278
       },
-      "duration": 5.7773,
-      "changes": 20,
-      "last_row_id": 5,
+      "duration": 3.1278,
+      "changes": 2,
+      "last_row_id": 15,
       "changed_db": true,
       "size_after": 126976,
-      "rows_read": 33,
-      "rows_written": 77,
+      "rows_read": 1,
+      "rows_written": 3,
       "num_tables": 11,
       "total_attempts": 1
     }
@@ -73,25 +49,25 @@ KV id: b0bcde3d2767416ba0668702c8e95bb0
 ─────────────────────────────────────────────
 
 Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
-Total Upload: 66.56 KiB / gzip: 14.56 KiB
+Total Upload: 66.96 KiB / gzip: 14.68 KiB
 Your Worker has access to the following bindings:
 Binding                                           Resource          
 env.CACHE (b0bcde3d2767416ba0668702c8e95bb0)      KV Namespace      
 env.DB (anomaly-db)                               D1 Database       
 
-Uploaded anomaly-detector (1.41 sec)
-Deployed anomaly-detector triggers (1.07 sec)
+Uploaded anomaly-detector (2.76 sec)
+Deployed anomaly-detector triggers (0.82 sec)
   https://anomaly-detector.tinastocks.workers.dev
   schedule: */5 * * * *
-Current Version ID: a882759c-0deb-4735-aa19-95cb273cb106
+Current Version ID: a71f00ac-85a7-42e5-b4a4-63bebd05ba50
 Worker URL: https://anomaly-detector.tinastocks.workers.dev
 ── 6) 打包插件（注入 worker URL）──
 SHOP5_URL_PROD → https://anomaly-detector.tinastocks.workers.dev
-已生成： /home/runner/work/my-tools/my-tools/dist/v5-stock-plugin.zip (21970 bytes, 26 files)
+已生成： /home/runner/work/my-tools/my-tools/dist/v5-stock-plugin.zip (22359 bytes, 26 files)
 在紫鸟浏览器中：扩展程序 - 加载已解压扩展程序，选择 dist/v5-stock-plugin/ 即可。
 
 ═══════════════════════════════════════════════
-deployed_at:  2026-05-10T08:00:34Z
+deployed_at:  2026-05-10T08:11:04Z
 worker_url:   https://anomaly-detector.tinastocks.workers.dev
 db_name:      anomaly-db
 db_id:        734603b4-6b32-46ea-bb58-10b67e004af2
