@@ -70,26 +70,35 @@ async function checkProfile() {
 
 async function authorization(authCode) {
   const out = { status: 0, message: null, value: null };
-  // 先做 sellerProfile，方便把 merchantId 一并提交（等价于 AD 插件的 entityId）
-  let sp = null;
-  try { sp = await ProfileService.sellerProfile(); } catch {}
-  if (!sp || !sp.merchantId) {
-    out.message = '未登录亚马逊后台（Seller Central），请先登录 sellercentral.amazon.com';
+
+  // 1) 先用 chrome.cookies 判断是否登录（不依赖 HTML 解析，最可靠）
+  const loggedIn = await ProfileService.isLoggedIn();
+  if (!loggedIn) {
+    out.message = '未登录亚马逊后台（Seller Central），请先登录 sellercentral.amazon.com（登录时勾选 Keep me signed in）';
     out.value   = { activated: false };
     return out;
   }
+
+  // 2) 尽力拿 merchantId / marketplaceId（拿不到也不阻断激活，先用占位值）
+  let sp = null;
+  try { sp = await ProfileService.sellerProfile(); } catch {}
+  const merchantId    = sp && sp.merchantId    ? sp.merchantId    : ('UNKNOWN_' + authCode.slice(-6));
+  const marketplaceId = sp && sp.marketplaceId ? sp.marketplaceId : DEFINE.MKID_US;
+  console.log('[auth] sellerProfile:', sp);
+
   const auth = await AuthService.auth(
-    sp.merchantId,                          // entityId（用 merchantId 表示店铺）
-    sp.marketplaceId || DEFINE.MKID_US,
+    merchantId,
+    marketplaceId,
     null, null, authCode
   );
   if (auth.status) {
     const patch = {
       authorized: true, authStatus: 1, accessible: true, activated: true,
       authCode,
-      entityId: sp.merchantId,
-      merchantId: sp.merchantId,
-      marketplaceId: sp.marketplaceId || DEFINE.MKID_US,
+      entityId: merchantId,
+      merchantId,
+      marketplaceId,
+      profileSource: sp && sp.source,
       refreshToken: auth.refreshToken,
       accessToken:  auth.accessToken,
       expiryTime:   auth.expiryTime,
