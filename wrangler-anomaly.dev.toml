@@ -1,0 +1,16 @@
+# 本地烟测专用配置 —— 用 miniflare 内置 D1（不依赖 CF 账号）
+name = "anomaly-detector-dev"
+main = "anomaly-worker.js"
+compatibility_date = "2024-12-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "anomaly-db-local"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "0000000000000000000000000000aaaa"
+
+[triggers]
+crons = []
