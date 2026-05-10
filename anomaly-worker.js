@@ -114,6 +114,10 @@ export default {
       if (path === '/api/agent-commands' && method === 'POST') return await createAgentCommand(env, request);
       if (path.match(/^\/api\/agent-commands\/\d+$/) && method === 'DELETE') return await deleteRow(env, 'agent_commands', extractId(path));
 
+      // SP-API 拉取器（系统值来源）
+      if (path === '/api/sp-api/test' && method === 'POST') return await spApiTest(env);
+      if (path === '/api/sp-api/pull' && method === 'POST') return await spApiPullNow(env);
+
       return corsJson({ ok: false, error: 'Not Found' }, 404);
     } catch (e) {
       console.error('handler error', e, e.stack);
@@ -124,7 +128,8 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       try {
-        await runAllDetectionsCore(env);
+        await spApiPullCronStep(env);     // 系统值（SP-API）
+        await runAllDetectionsCore(env);  // 跨源比对 + 其它检测
         await pruneOldData(env);
       } catch (e) {
         console.error('scheduled error', e, e.stack);
@@ -195,7 +200,72 @@ async function initDB(env) {
   for (const s of stmts) {
     try { await env.DB.prepare(s).run(); } catch (e) { /* ignore re-init */ }
   }
+  await seedDefaultRules(env);
   return corsJson({ ok: true, statements: stmts.length });
+}
+
+async function seedDefaultRules(env) {
+  // 仅当规则表为空时种入默认 6 条，覆盖 6 类异常各一例
+  const r = await env.DB.prepare('SELECT COUNT(*) AS n FROM anomaly_rules').first();
+  if ((r?.n || 0) > 0) return;
+  const defaults = [
+    {
+      name: 'FBA可售库存：SP-API vs 紫鸟（跨源比对）',
+      description: 'SP-API 与紫鸟后台采集的 fba_available 不一致即告警',
+      rule_type: 'cross_source', metric: 'fba_available',
+      source_a: 'sp_api_inventory_summary', source_b: 'ziniao_seller_central',
+      tolerance_abs: 1, tolerance_pct: 5, severity: 'warning',
+      rate_limit_seconds: 1800,
+    },
+    {
+      name: 'FBA预留库存：SP-API vs 紫鸟（跨源比对）',
+      rule_type: 'cross_source', metric: 'fba_reserved',
+      source_a: 'sp_api_inventory_summary', source_b: 'ziniao_seller_central',
+      tolerance_abs: 1, tolerance_pct: 5, severity: 'info',
+      rate_limit_seconds: 1800,
+    },
+    {
+      name: '紫鸟数据停更',
+      description: '紫鸟插件超过 30 分钟未上报数据',
+      rule_type: 'staleness', metric: 'fba_available',
+      source_a: 'ziniao_seller_central',
+      staleness_minutes: 30, severity: 'warning',
+      rate_limit_seconds: 1800,
+    },
+    {
+      name: 'SP-API 数据停更',
+      description: 'SP-API 拉取器超过 90 分钟未刷新',
+      rule_type: 'staleness', metric: 'fba_available',
+      source_a: 'sp_api_inventory_summary',
+      staleness_minutes: 90, severity: 'warning',
+      rate_limit_seconds: 3600,
+    },
+    {
+      name: '可售库存异常跳变',
+      description: '单次刷新 fba_available 跳变 ≥ 80% 视为异常',
+      rule_type: 'sudden_jump', metric: 'fba_available',
+      source_a: 'ziniao_seller_central',
+      jump_pct: 80, severity: 'critical',
+      rate_limit_seconds: 1800,
+    },
+  ];
+  for (const d of defaults) {
+    await env.DB.prepare(
+      `INSERT INTO anomaly_rules (name, description, rule_type, scope_type, scope_keys, metric,
+         source_a, source_b, tolerance_abs, tolerance_pct, staleness_minutes, jump_pct,
+         expected_interval_minutes, config, severity, is_active, notify_channel_ids, rate_limit_seconds)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(
+      d.name, d.description || '', d.rule_type, 'all', '[]', d.metric || null,
+      d.source_a || null, d.source_b || null,
+      d.tolerance_abs || 0, d.tolerance_pct || 0,
+      d.staleness_minutes || 0, d.jump_pct || 0,
+      d.expected_interval_minutes || 0,
+      JSON.stringify(d.config || {}),
+      d.severity || 'warning', 1, '[]',
+      d.rate_limit_seconds || 600
+    ).run();
+  }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1224,6 +1294,161 @@ async function createAgentCommand(env, request) {
 }
 
 // ════════════════════════════════════════════════════════════
+// SP-API 拉取器 —— 内置"系统值"来源
+// 在 settings 中保存 LWA 凭证；定时拉 FBA Inventory Summaries
+// 字段写入 source='sp_api_inventory_summary'
+// ════════════════════════════════════════════════════════════
+
+const SP_API_REGION_HOST = {
+  'us-east-1':  'sellingpartnerapi-na.amazon.com',
+  'eu-west-1':  'sellingpartnerapi-eu.amazon.com',
+  'us-west-2':  'sellingpartnerapi-fe.amazon.com',
+};
+const SP_API_MARKET_REGION = {
+  ATVPDKIKX0DER: 'us-east-1', A2EUQ1WTGCTBG2: 'us-east-1', A1AM78C64UM0Y8: 'us-east-1',
+  A1F83G8C2ARO7P: 'eu-west-1', A1PA6795UKMFR9: 'eu-west-1', A13V1IB3VIYZZH: 'eu-west-1',
+  APJ6JRA9NG5V4:  'eu-west-1', A1RKKUPIHCS9HS: 'eu-west-1',
+  A1VC38T7YXB528: 'us-west-2', A39IBJ37TRP1C6: 'us-west-2',
+};
+
+async function spApiCreds(env) {
+  const get = async (k) => await getSetting(env, k, '');
+  return {
+    enabled:        (await get('sp_api_enabled')) === '1',
+    clientId:       await get('sp_api_client_id'),
+    clientSecret:   await get('sp_api_client_secret'),
+    refreshToken:   await get('sp_api_refresh_token'),
+    marketplaceId:  await get('sp_api_marketplace_id') || 'ATVPDKIKX0DER',
+    intervalMin:    +(await get('sp_api_interval_minutes')) || 60,
+    lastRunAt:      await get('sp_api_last_run_at'),
+  };
+}
+
+async function spApiLwaToken(creds) {
+  // KV 缓存 access_token 1 小时；这里简化为每次刷新（请求开销不大，且 D1 写入也少）
+  const resp = await fetch('https://api.amazon.com/auth/o2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: creds.refreshToken,
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
+    }),
+  });
+  const j = await resp.json();
+  if (!resp.ok || !j.access_token) {
+    throw new Error('LWA: ' + (j.error_description || j.error || resp.statusText));
+  }
+  return j.access_token;
+}
+
+async function spApiFetchInventory(creds) {
+  const region = SP_API_MARKET_REGION[creds.marketplaceId] || 'us-east-1';
+  const host = SP_API_REGION_HOST[region];
+  const token = await spApiLwaToken(creds);
+  const items = [];
+  let nextToken = null;
+  for (let page = 0; page < 50; page++) {
+    const params = new URLSearchParams({
+      details: 'true',
+      granularityType: 'Marketplace',
+      granularityId: creds.marketplaceId,
+      marketplaceIds: creds.marketplaceId,
+    });
+    if (nextToken) params.set('nextToken', nextToken);
+    const resp = await fetch(`https://${host}/fba/inventory/v1/summaries?${params}`, {
+      headers: { 'x-amz-access-token': token, 'Content-Type': 'application/json' },
+    });
+    if (!resp.ok) {
+      const t = await resp.text();
+      throw new Error(`SP-API ${resp.status}: ${t.slice(0, 300)}`);
+    }
+    const j = await resp.json();
+    const summaries = j?.payload?.inventorySummaries || j?.inventorySummaries || [];
+    for (const s of summaries) {
+      const d = s.inventoryDetails || {};
+      items.push({
+        asin: s.asin || null,
+        sku:  s.sellerSku || s.fnSku || null,
+        fba_available: num(d.fulfillableQuantity),
+        fba_reserved:  num(d.reservedQuantity?.totalReservedQuantity ?? d.reservedQuantity),
+        fba_inbound:   num(
+          (d.inboundShippedQuantity || 0) +
+          (d.inboundReceivingQuantity || 0) +
+          (d.inboundWorkingQuantity || 0)
+        ),
+        fba_unfulfillable: num(d.unfulfillableQuantity?.totalUnfulfillableQuantity ?? d.unfulfillableQuantity),
+      });
+    }
+    nextToken = j?.pagination?.nextToken || j?.payload?.nextToken;
+    if (!nextToken) break;
+  }
+  return items;
+  function num(v) { if (v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
+}
+
+async function spApiIngestSnapshots(env, items) {
+  if (!items?.length) return 0;
+  const fetchedAt = nowIso();
+  const insert = env.DB.prepare(
+    'INSERT INTO data_snapshots (source_code, scope_key, metric, value, raw_json, fetched_at) VALUES (?,?,?,?,?,?)'
+  );
+  const ops = [];
+  for (const it of items) {
+    const scope = it.asin || it.sku;
+    if (!scope) continue;
+    for (const m of ['fba_available', 'fba_reserved', 'fba_inbound', 'fba_unfulfillable']) {
+      if (it[m] == null) continue;
+      ops.push(insert.bind('sp_api_inventory_summary', String(scope), m, Number(it[m]),
+        JSON.stringify({ asin: it.asin, sku: it.sku }), fetchedAt));
+    }
+  }
+  if (ops.length) await env.DB.batch(ops);
+  return ops.length;
+}
+
+async function spApiTest(env) {
+  const creds = await spApiCreds(env);
+  if (!creds.clientId || !creds.refreshToken) {
+    return corsJson({ ok: false, error: '请先在系统设置中填写 SP-API 凭证' }, 400);
+  }
+  try {
+    const items = await spApiFetchInventory(creds);
+    return corsJson({ ok: true, sample_count: items.length, sample: items.slice(0, 5) });
+  } catch (e) {
+    return corsJson({ ok: false, error: e.message }, 500);
+  }
+}
+
+async function spApiPullNow(env) {
+  const creds = await spApiCreds(env);
+  if (!creds.clientId || !creds.refreshToken) {
+    return corsJson({ ok: false, error: '请先在系统设置中填写 SP-API 凭证' }, 400);
+  }
+  const items = await spApiFetchInventory(creds);
+  const wrote = await spApiIngestSnapshots(env, items);
+  await setSetting(env, 'sp_api_last_run_at', nowIso());
+  return corsJson({ ok: true, items: items.length, snapshots_inserted: wrote });
+}
+
+async function spApiPullCronStep(env) {
+  const creds = await spApiCreds(env);
+  if (!creds.enabled || !creds.clientId || !creds.refreshToken) return;
+  // 节流：按 interval_minutes 决定是否本次跑
+  const last = creds.lastRunAt;
+  if (last && minutesBetween(last, nowIso()) < creds.intervalMin) return;
+  try {
+    const items = await spApiFetchInventory(creds);
+    await spApiIngestSnapshots(env, items);
+    await setSetting(env, 'sp_api_last_run_at', nowIso());
+    console.log(`[sp-api] pulled ${items.length} items`);
+  } catch (e) {
+    console.error('[sp-api] cron error', e.message);
+  }
+}
+
+// ════════════════════════════════════════════════════════════
 // Schema（用于 /api/init-db；与 anomaly-schema.sql 保持一致）
 // ════════════════════════════════════════════════════════════
 
@@ -1354,6 +1579,13 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('snapshot_retention_days', '
 INSERT OR IGNORE INTO settings (key, value) VALUES ('anomaly_retention_days', '180');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('detection_run_retention_days', '14');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('api_token', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_enabled', '0');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_client_id', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_client_secret', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_refresh_token', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_marketplace_id', 'ATVPDKIKX0DER');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_interval_minutes', '60');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_last_run_at', '');
 INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES ('system', '业务系统当前值', 'system');
 INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES ('sp_api_inventory_summary', 'SP-API FBA 库存摘要', 'sp_api');
 INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES ('sp_api_inventory_report', 'SP-API FBA 库存报告', 'report');

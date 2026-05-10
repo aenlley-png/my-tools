@@ -278,6 +278,43 @@
 
 <!-- ═══════ 系统设置 ═══════ -->
 <section id="tab-settings" class="tab-content hidden">
+  <!-- SP-API 凭证（系统值来源） -->
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 max-w-2xl mb-4">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold">SP-API 拉取器（"系统值"来源）</h3>
+      <span id="sp-status" class="text-xs text-gray-400">未配置</span>
+    </div>
+    <p class="text-xs text-gray-500 mb-3">配置后，Worker 会按设定间隔自动从 SP-API 拉取 FBA 库存，作为跨源比对的"系统值"。无需依赖外部业务系统。</p>
+    <div class="space-y-3">
+      <div><label class="text-sm">LWA Client ID</label><input id="sp-cid" class="input mt-1"></div>
+      <div><label class="text-sm">LWA Client Secret</label><input id="sp-cs" class="input mt-1" type="password"></div>
+      <div><label class="text-sm">Refresh Token</label><input id="sp-rt" class="input mt-1" type="password"></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm">Marketplace ID</label>
+          <select id="sp-mp" class="select mt-1">
+            <option value="ATVPDKIKX0DER">US (ATVPDKIKX0DER)</option>
+            <option value="A2EUQ1WTGCTBG2">CA</option>
+            <option value="A1AM78C64UM0Y8">MX</option>
+            <option value="A1F83G8C2ARO7P">UK</option>
+            <option value="A1PA6795UKMFR9">DE</option>
+            <option value="A13V1IB3VIYZZH">FR</option>
+            <option value="APJ6JRA9NG5V4">IT</option>
+            <option value="A1RKKUPIHCS9HS">ES</option>
+            <option value="A1VC38T7YXB528">JP</option>
+            <option value="A39IBJ37TRP1C6">AU</option>
+          </select>
+        </div>
+        <div><label class="text-sm">拉取间隔（分钟）</label><input id="sp-int" class="input mt-1" type="number" min="5" value="60"></div>
+      </div>
+      <div><label class="text-sm"><input type="checkbox" id="sp-en"> 启用定时拉取（cron 触发器每 5 分钟检查一次是否到期）</label></div>
+    </div>
+    <div class="mt-4 flex gap-2">
+      <button onclick="saveSpApi()"  class="btn btn-primary">保存配置</button>
+      <button onclick="testSpApi()"  class="btn btn-warning">测试连通</button>
+      <button onclick="pullSpApi()"  class="btn btn-success">立即拉取</button>
+    </div>
+  </div>
+
   <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 max-w-2xl">
     <h3 class="text-lg font-semibold mb-4">系统设置</h3>
     <div class="space-y-3">
@@ -969,6 +1006,38 @@ async function loadSettings() {
   document.getElementById('set-snap-days').value = r.data.snapshot_retention_days || 30;
   document.getElementById('set-anom-days').value = r.data.anomaly_retention_days || 180;
   document.getElementById('set-run-days').value = r.data.detection_run_retention_days || 14;
+  // SP-API
+  document.getElementById('sp-cid').value = r.data.sp_api_client_id || '';
+  document.getElementById('sp-cs') .value = r.data.sp_api_client_secret || '';
+  document.getElementById('sp-rt') .value = r.data.sp_api_refresh_token || '';
+  document.getElementById('sp-mp') .value = r.data.sp_api_marketplace_id || 'ATVPDKIKX0DER';
+  document.getElementById('sp-int').value = r.data.sp_api_interval_minutes || 60;
+  document.getElementById('sp-en') .checked = r.data.sp_api_enabled === '1';
+  document.getElementById('sp-status').textContent = r.data.sp_api_last_run_at
+    ? '上次拉取：' + r.data.sp_api_last_run_at
+    : (r.data.sp_api_enabled === '1' ? '已启用，待首次拉取' : '未启用');
+}
+async function saveSpApi() {
+  const body = {
+    sp_api_client_id:        document.getElementById('sp-cid').value.trim(),
+    sp_api_client_secret:    document.getElementById('sp-cs').value.trim(),
+    sp_api_refresh_token:    document.getElementById('sp-rt').value.trim(),
+    sp_api_marketplace_id:   document.getElementById('sp-mp').value,
+    sp_api_interval_minutes: +document.getElementById('sp-int').value || 60,
+    sp_api_enabled:          document.getElementById('sp-en').checked ? '1' : '0',
+  };
+  try { await api('/api/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('已保存', 'success'); loadSettings(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function testSpApi() {
+  try { const r = await api('/api/sp-api/test', { method: 'POST' });
+    toast(`OK，可拉取 ${r.sample_count} 条`, 'success'); console.log('sample', r.sample); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function pullSpApi() {
+  try { const r = await api('/api/sp-api/pull', { method: 'POST' });
+    toast(`拉取 ${r.items} 条，写入快照 ${r.snapshots_inserted} 行`, 'success'); loadSettings(); }
+  catch (e) { toast(e.message, 'error'); }
 }
 async function saveSettings() {
   const body = {

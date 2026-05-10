@@ -173,7 +173,14 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('snapshot_retention_days', '30'),
   ('anomaly_retention_days', '180'),
   ('detection_run_retention_days', '14'),
-  ('api_token', '');
+  ('api_token', ''),
+  ('sp_api_enabled', '0'),
+  ('sp_api_client_id', ''),
+  ('sp_api_client_secret', ''),
+  ('sp_api_refresh_token', ''),
+  ('sp_api_marketplace_id', 'ATVPDKIKX0DER'),
+  ('sp_api_interval_minutes', '60'),
+  ('sp_api_last_run_at', '');
 
 INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES
   ('system', '业务系统当前值', 'system'),
