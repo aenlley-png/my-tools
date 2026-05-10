@@ -14,11 +14,11 @@ compatibility_date = "2024-12-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "anomaly-db"
-database_id = "REPLACE_WITH_YOUR_D1_ID"
+database_id = "734603b4-6b32-46ea-bb58-10b67e004af2"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "REPLACE_WITH_YOUR_KV_ID"
+id = "b0bcde3d2767416ba0668702c8e95bb0"
 
 # 每 5 分钟扫描一次（覆盖大多数业务节奏，且 staleness/heartbeat 检测更敏感）
 [triggers]
