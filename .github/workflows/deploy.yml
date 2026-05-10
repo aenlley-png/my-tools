@@ -1,14 +1,14 @@
 name: Deploy Anomaly Detector to Cloudflare
 
 on:
-  workflow_dispatch:        # 手动触发（默认分支）
+  workflow_dispatch:
   push:
     branches:
       - main
-      - 'claude/**'         # 当前分支也能触发，方便首发部署
+      - 'claude/**'
 
 permissions:
-  contents: write           # 允许把更新后的 wrangler-anomaly.toml 提交回去
+  contents: write
 
 jobs:
   deploy:
@@ -24,37 +24,69 @@ jobs:
         run: npm i -g wrangler@4
 
       - name: Run deploy.sh
+        id: deploy
+        continue-on-error: true            # 失败也不要让后面"提交状态"的步骤被跳过
         env:
           CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          set -o pipefail
           chmod +x tools/deploy.sh
-          bash tools/deploy.sh
+          bash tools/deploy.sh 2>&1 | tee /tmp/deploy.log
 
-      - name: Upload plugin artifact
+      - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: v5-stock-plugin
+          name: deploy-output
           path: |
+            /tmp/deploy.log
             dist/v5-stock-plugin.zip
             dist/v5-stock-plugin/
             dist/DEPLOY_INFO.txt
           retention-days: 30
+          if-no-files-found: warn
 
-      - name: Print deploy info
+      - name: Commit status (always)
         if: always()
         run: |
-          echo "════════════════════════════════════════"
-          if [ -f dist/DEPLOY_INFO.txt ]; then cat dist/DEPLOY_INFO.txt; fi
-          echo "════════════════════════════════════════"
+          set -e
+          mkdir -p .deploy
+          {
+            echo "status: ${{ steps.deploy.outcome }}"
+            echo "run_id: ${{ github.run_id }}"
+            echo "run_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "trigger_sha: ${{ github.sha }}"
+            echo "actor: ${{ github.actor }}"
+            echo "started_at: $(date -u +%FT%TZ)"
+            if [ -f dist/DEPLOY_INFO.txt ]; then
+              echo "---"
+              echo "── DEPLOY_INFO ──"
+              cat dist/DEPLOY_INFO.txt
+            fi
+            echo "---"
+            echo "── deploy log (last 100 lines) ──"
+            if [ -f /tmp/deploy.log ]; then tail -100 /tmp/deploy.log; else echo "(no log produced — step may not have started)"; fi
+          } > .deploy/last.txt
 
-      - name: Commit updated wrangler-anomaly.toml
-        if: success()
-        run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add wrangler-anomaly.toml
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: persist deployed D1/KV ids [skip ci]"
-            git push
+          git add .deploy/last.txt
+          # 部署成功时也把 wrangler-anomaly.toml 一并提交（D1/KV 真实 id）
+          if [ "${{ steps.deploy.outcome }}" = "success" ]; then
+            git add wrangler-anomaly.toml || true
           fi
+          if git diff --cached --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -m "ci: deploy status=${{ steps.deploy.outcome }} [skip ci]"
+            # 推送时若分支已有更新先 rebase
+            for i in 1 2 3; do
+              git pull --rebase origin "${GITHUB_REF_NAME}" && git push && break
+              sleep 2
+            done
+          fi
+
+      - name: Fail job if deploy failed
+        if: steps.deploy.outcome != 'success'
+        run: exit 1
