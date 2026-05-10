@@ -25,6 +25,23 @@ export default {
     const method = request.method;
 
     if (method === 'OPTIONS') return cors('', 204);
+
+    // ── 插件协议（v5-stock-plugin）：与业务系统已有 /plugin/... 同风格 ──
+    // 这些端点使用 device_token，与 admin api_token 互不影响
+    if (path.startsWith('/plugin/stock/')) {
+      try {
+        if (path === '/plugin/stock/auth' && method === 'POST')                return await pluginStockAuth(env, request);
+        if (path === '/plugin/stock/atoken' && method === 'POST')              return await pluginStockAtoken(env, request);
+        if (path === '/plugin/stock/heartbeat' && method === 'POST')           return await pluginStockHeartbeat(env, request);
+        if (path === '/plugin/stock/inventory/download' && method === 'POST')  return await pluginStockDownload(env, request);
+        if (path === '/plugin/stock/inventory/upload' && method === 'POST')    return await pluginStockUpload(env, request);
+        return corsJson({ code: 404, msg: 'Not Found' }, 404);
+      } catch (e) {
+        console.error('plugin handler', e);
+        return corsJson({ code: 500, msg: e.message }, 500);
+      }
+    }
+
     if (!path.startsWith('/api/')) {
       return corsJson({ message: 'Anomaly Detector API. See /api/health.' });
     }
@@ -84,6 +101,18 @@ export default {
 
       // 整体检测（手动触发）
       if (path === '/api/detect/all' && method === 'POST') return await runAllDetections(env);
+
+      // 插件 Agent 管理（admin）
+      if (path === '/api/auth-codes' && method === 'GET')  return await listAuthCodes(env);
+      if (path === '/api/auth-codes' && method === 'POST') return await createAuthCode(env, request);
+      if (path.match(/^\/api\/auth-codes\/[\w-]+$/) && method === 'DELETE') return await deleteAuthCode(env, path);
+
+      if (path === '/api/agent-devices' && method === 'GET') return await listAgentDevices(env);
+      if (path.match(/^\/api\/agent-devices\/\d+$/) && method === 'DELETE') return await deleteRow(env, 'agent_devices', extractId(path));
+
+      if (path === '/api/agent-commands' && method === 'GET')  return await listAgentCommands(env, url);
+      if (path === '/api/agent-commands' && method === 'POST') return await createAgentCommand(env, request);
+      if (path.match(/^\/api\/agent-commands\/\d+$/) && method === 'DELETE') return await deleteRow(env, 'agent_commands', extractId(path));
 
       return corsJson({ ok: false, error: 'Not Found' }, 404);
     } catch (e) {
@@ -973,6 +1002,228 @@ async function pruneOldData(env) {
 }
 
 // ════════════════════════════════════════════════════════════
+// 插件 Agent —— /plugin/stock/* 端点（与业务系统 V5 Plugin 同协议风格）
+// ════════════════════════════════════════════════════════════
+
+function pluginOK(data = {}) { return corsJson({ code: 0, msg: 'ok', ...data }); }
+function pluginErr(msg, code = 1) { return corsJson({ code, msg }); }
+
+function randomToken(prefix = '') {
+  const buf = new Uint8Array(24); crypto.getRandomValues(buf);
+  const s = Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
+  return (prefix ? prefix + '_' : '') + s;
+}
+function randomCode(len = 16) {
+  // 16 位大写 HEX，与业务系统现有授权码格式一致（例 2073405DB9F0F817）
+  const buf = new Uint8Array(Math.ceil(len / 2)); crypto.getRandomValues(buf);
+  return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase().slice(0, len);
+}
+
+async function authedDevice(env, request) {
+  const tok = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!tok) return null;
+  return await env.DB.prepare(
+    'SELECT * FROM agent_devices WHERE device_token=? AND is_active=1'
+  ).bind(tok).first();
+}
+
+// POST /plugin/stock/auth  body: { authCode, entityId, marketplaceId, advertiserId, advertiserType, pluginType }
+async function pluginStockAuth(env, request) {
+  const b = await request.json().catch(() => ({}));
+  const code = String(b.authCode || '').trim().toUpperCase();
+  if (!code) return pluginErr('authCode required');
+  const row = await env.DB.prepare('SELECT * FROM auth_codes WHERE code=?').bind(code).first();
+  if (!row) return pluginErr('授权码不存在');
+  if (row.consumed_by_device_id) {
+    // 已被消费 → 视为重新激活：旋转 token
+    const dev = await env.DB.prepare('SELECT * FROM agent_devices WHERE id=?').bind(row.consumed_by_device_id).first();
+    if (dev) {
+      const newTok = randomToken('dev'); const newRefresh = randomToken('rt');
+      await env.DB.prepare(
+        `UPDATE agent_devices SET device_token=?, refresh_token=?, token_expires_at=datetime('now','+30 day'),
+           entity_id=?, marketplace_id=?, advertiser_id=?, advertiser_type=?, last_seen_at=datetime('now')
+         WHERE id=?`
+      ).bind(newTok, newRefresh, b.entityId || dev.entity_id, b.marketplaceId || dev.marketplace_id,
+             b.advertiserId || dev.advertiser_id, b.advertiserType || dev.advertiser_type, dev.id).run();
+      return pluginOK({ accessToken: newTok, refreshToken: newRefresh, expiryTime: 30 * 86400 });
+    }
+  }
+  const tok = randomToken('dev'); const refresh = randomToken('rt');
+  const r = await env.DB.prepare(
+    `INSERT INTO agent_devices (name, auth_code, entity_id, marketplace_id, advertiser_id, advertiser_type,
+       device_token, refresh_token, token_expires_at, last_seen_at)
+     VALUES (?,?,?,?,?,?,?,?, datetime('now','+30 day'), datetime('now'))`
+  ).bind(
+    row.description || ('device-' + code.slice(-6)), code,
+    b.entityId || null, b.marketplaceId || null, b.advertiserId || null, b.advertiserType || null,
+    tok, refresh
+  ).run();
+  await env.DB.prepare('UPDATE auth_codes SET consumed_at=datetime(\'now\'), consumed_by_device_id=? WHERE code=?')
+    .bind(r.meta.last_row_id, code).run();
+  return pluginOK({ accessToken: tok, refreshToken: refresh, expiryTime: 30 * 86400 });
+}
+
+// POST /plugin/stock/atoken  body: { refreshToken }
+async function pluginStockAtoken(env, request) {
+  const b = await request.json().catch(() => ({}));
+  if (!b.refreshToken) return pluginErr('refreshToken required');
+  const dev = await env.DB.prepare(
+    'SELECT * FROM agent_devices WHERE refresh_token=? AND is_active=1'
+  ).bind(b.refreshToken).first();
+  if (!dev) return pluginErr('refreshToken 无效');
+  const newTok = randomToken('dev');
+  await env.DB.prepare(
+    `UPDATE agent_devices SET device_token=?, token_expires_at=datetime('now','+30 day'), last_seen_at=datetime('now') WHERE id=?`
+  ).bind(newTok, dev.id).run();
+  return pluginOK({ accessToken: newTok, expiryTime: 30 * 86400 });
+}
+
+// POST /plugin/stock/heartbeat  body: { status, entityId, marketplaceId, advertiserId, advertiserType }
+async function pluginStockHeartbeat(env, request) {
+  const dev = await authedDevice(env, request);
+  if (!dev) return pluginErr('未授权', 401);
+  const b = await request.json().catch(() => ({}));
+  await env.DB.prepare(
+    `UPDATE agent_devices SET last_seen_at=datetime('now'),
+       entity_id=COALESCE(?, entity_id), marketplace_id=COALESCE(?, marketplace_id),
+       advertiser_id=COALESCE(?, advertiser_id), advertiser_type=COALESCE(?, advertiser_type),
+       last_status=?
+     WHERE id=?`
+  ).bind(b.entityId || null, b.marketplaceId || null, b.advertiserId || null, b.advertiserType || null,
+         String(b.status ?? 1), dev.id).run();
+  return pluginOK();
+}
+
+// POST /plugin/stock/inventory/download
+//   返回设备待执行的最多 N 条命令；锁定为 'locked'，避免重复领取
+async function pluginStockDownload(env, request) {
+  const dev = await authedDevice(env, request);
+  if (!dev) return pluginErr('未授权', 401);
+  await env.DB.prepare('UPDATE agent_devices SET last_seen_at=datetime(\'now\') WHERE id=?').bind(dev.id).run();
+
+  const lockId = randomToken('lock');
+  // 锁定最多 5 条 pending 命令
+  const { results: pending } = await env.DB.prepare(
+    `SELECT * FROM agent_commands
+     WHERE device_id=? AND status='pending'
+     ORDER BY priority DESC, created_at ASC LIMIT 5`
+  ).bind(dev.id).all();
+  const ids = (pending || []).map(p => p.id);
+  if (ids.length) {
+    const ph = ids.map(() => '?').join(',');
+    await env.DB.prepare(
+      `UPDATE agent_commands SET status='locked', locked_at=datetime('now'), lock_id=? WHERE id IN (${ph})`
+    ).bind(lockId, ...ids).run();
+  }
+  const data = (pending || []).map(p => ({
+    taskId: p.id,
+    action: p.action,
+    params: safeParse(p.params, {}),
+  }));
+  return pluginOK({ data, lockId, totalResults: data.length });
+}
+
+// POST /plugin/stock/inventory/upload  body: { taskId, status, items?, message? }
+async function pluginStockUpload(env, request) {
+  const dev = await authedDevice(env, request);
+  if (!dev) return pluginErr('未授权', 401);
+  const b = await request.json().catch(() => ({}));
+  if (!b.taskId) return pluginErr('taskId required');
+  const cmd = await env.DB.prepare(
+    'SELECT * FROM agent_commands WHERE id=? AND device_id=?'
+  ).bind(+b.taskId, dev.id).first();
+  if (!cmd) return pluginErr('command 不存在');
+
+  const ok = b.status === 1 || b.status === '1' || b.status === true;
+  const params = safeParse(cmd.params, {});
+  const sourceCode = params.source_code || 'ziniao_seller_central';
+
+  // FBA 库存：把 items 直接入 data_snapshots
+  if (ok && cmd.action === 'fba_inventory' && Array.isArray(b.items) && b.items.length) {
+    const fetchedAt = nowIso();
+    const insert = env.DB.prepare(
+      'INSERT INTO data_snapshots (source_code, scope_key, metric, value, raw_json, fetched_at) VALUES (?,?,?,?,?,?)'
+    );
+    const ops = [];
+    for (const it of b.items) {
+      const scope = it.asin || it.sku;
+      if (!scope) continue;
+      for (const [metric, valKey] of [
+        ['fba_available', 'fba_available'], ['fba_reserved', 'fba_reserved'],
+        ['fba_inbound', 'fba_inbound'], ['fba_unfulfillable', 'fba_unfulfillable'],
+      ]) {
+        const v = it[valKey];
+        if (v == null) continue;
+        ops.push(insert.bind(sourceCode, String(scope), metric, Number(v),
+          JSON.stringify({ asin: it.asin, sku: it.sku }), fetchedAt));
+      }
+    }
+    if (ops.length) await env.DB.batch(ops);
+  }
+
+  await env.DB.prepare(
+    `UPDATE agent_commands SET status=?, finished_at=datetime('now'), result=?, message=? WHERE id=?`
+  ).bind(ok ? 'done' : 'failed',
+         JSON.stringify({ items_count: Array.isArray(b.items) ? b.items.length : 0 }),
+         b.message || null, cmd.id).run();
+  return pluginOK();
+}
+
+// ── admin: 授权码 ─────────────────────────────────────
+async function listAuthCodes(env) {
+  const { results } = await env.DB.prepare('SELECT * FROM auth_codes ORDER BY created_at DESC').all();
+  return corsJson({ ok: true, data: results || [] });
+}
+async function createAuthCode(env, request) {
+  const b = await request.json().catch(() => ({}));
+  const code = randomCode(16);
+  await env.DB.prepare(
+    'INSERT INTO auth_codes (code, description, expected_marketplace_id) VALUES (?,?,?)'
+  ).bind(code, b.description || '', b.expected_marketplace_id || null).run();
+  return corsJson({ ok: true, code });
+}
+async function deleteAuthCode(env, path) {
+  const code = path.split('/').pop();
+  await env.DB.prepare('DELETE FROM auth_codes WHERE code=?').bind(code).run();
+  return corsJson({ ok: true });
+}
+
+// ── admin: 设备 ───────────────────────────────────────
+async function listAgentDevices(env) {
+  const { results } = await env.DB.prepare(
+    `SELECT id, name, auth_code, entity_id, marketplace_id, advertiser_id, advertiser_type,
+            last_seen_at, last_status, is_active, created_at,
+            (SELECT COUNT(*) FROM agent_commands c WHERE c.device_id=d.id AND c.status='pending') AS pending_count
+     FROM agent_devices d ORDER BY id DESC`
+  ).all();
+  return corsJson({ ok: true, data: results || [] });
+}
+
+// ── admin: 命令 ───────────────────────────────────────
+async function listAgentCommands(env, url) {
+  const status = url.searchParams.get('status');
+  const did = url.searchParams.get('device_id');
+  const limit = Math.min(+url.searchParams.get('limit') || 100, 1000);
+  const where = [], args = [];
+  if (status) { where.push('status=?'); args.push(status); }
+  if (did) { where.push('device_id=?'); args.push(+did); }
+  const sql = `SELECT c.*, d.name AS device_name FROM agent_commands c
+               LEFT JOIN agent_devices d ON d.id=c.device_id
+               ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+               ORDER BY c.id DESC LIMIT ?`;
+  const { results } = await env.DB.prepare(sql).bind(...args, limit).all();
+  return corsJson({ ok: true, data: results || [] });
+}
+async function createAgentCommand(env, request) {
+  const b = await request.json();
+  if (!b.device_id || !b.action) return corsJson({ ok: false, error: 'device_id/action required' }, 400);
+  const r = await env.DB.prepare(
+    'INSERT INTO agent_commands (device_id, action, params, priority) VALUES (?,?,?,?)'
+  ).bind(+b.device_id, String(b.action), JSON.stringify(b.params || {}), +b.priority || 0).run();
+  return corsJson({ ok: true, id: r.meta?.last_row_id });
+}
+
+// ════════════════════════════════════════════════════════════
 // Schema（用于 /api/init-db；与 anomaly-schema.sql 保持一致）
 // ════════════════════════════════════════════════════════════
 
@@ -1107,4 +1358,45 @@ INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES ('system', '
 INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES ('sp_api_inventory_summary', 'SP-API FBA 库存摘要', 'sp_api');
 INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES ('sp_api_inventory_report', 'SP-API FBA 库存报告', 'report');
 INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES ('manual_audit', '人工对账录入', 'manual');
+INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES ('ziniao_seller_central', '紫鸟插件 (Seller Central)', 'sp_api');
+CREATE TABLE IF NOT EXISTS auth_codes (
+  code TEXT PRIMARY KEY,
+  description TEXT DEFAULT '',
+  expected_marketplace_id TEXT,
+  consumed_at TEXT,
+  consumed_by_device_id INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS agent_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  auth_code TEXT,
+  entity_id TEXT,
+  marketplace_id TEXT,
+  advertiser_id TEXT,
+  advertiser_type TEXT,
+  device_token TEXT NOT NULL UNIQUE,
+  refresh_token TEXT,
+  token_expires_at TEXT,
+  last_seen_at TEXT,
+  last_status TEXT,
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_dev_token ON agent_devices(device_token);
+CREATE TABLE IF NOT EXISTS agent_commands (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  params TEXT DEFAULT '{}',
+  priority INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'pending',
+  lock_id TEXT,
+  locked_at TEXT,
+  finished_at TEXT,
+  result TEXT,
+  message TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cmd_pending ON agent_commands(device_id, status, created_at);
 `;

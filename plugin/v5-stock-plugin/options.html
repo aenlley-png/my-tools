@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>V5 Plugin-STOCK · Options</title>
+<link rel="stylesheet" href="styles/popup.css">
+</head>
+<body>
+<div class="card" style="width: 600px;">
+  <h3 style="margin-bottom:12px">V5 Plugin-STOCK · 选项</h3>
+  <p class="muted small">本插件配合"系统异常检测"后端使用，从亚马逊卖家后台静默采集 FBA 库存等数据并上报。</p>
+  <p class="muted small" style="margin-top:8px">授权码由后端管理员生成，长度 16 位（大写 HEX）。授权码与店铺一一对应。</p>
+  <p class="muted small" style="margin-top:8px">后端地址（编译时确定）：<code id="backend"></code></p>
+</div>
+<script>
+  fetch('DEFINE.js').then(r => r.text()).then(t => {
+    const m = t.match(/SHOP5_URL_PROD:\s*'([^']+)'/);
+    document.getElementById('backend').textContent = m ? m[1] : '(未知)';
+  });
+</script>
+</body>
+</html>

@@ -62,6 +62,7 @@
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="snapshots" onclick="switchTab('snapshots')">数据快照</button>
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="sources"   onclick="switchTab('sources')">数据源</button>
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="channels"  onclick="switchTab('channels')">通知渠道</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="agents"    onclick="switchTab('agents')">插件Agent</button>
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="settings"  onclick="switchTab('settings')">系统设置</button>
     </nav>
   </div>
@@ -209,6 +210,71 @@
     </table>
   </div>
 </section>
+
+<!-- ═══════ 插件Agent ═══════ -->
+<section id="tab-agents" class="tab-content hidden">
+  <div class="grid grid-cols-2 gap-4">
+    <!-- 授权码 -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold">授权码（一店一码）</h3>
+        <button onclick="genAuthCode()" class="btn btn-primary text-xs">+ 生成新授权码</button>
+      </div>
+      <table>
+        <thead><tr><th>授权码</th><th>说明</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="codes-tbody"><tr><td colspan="4" class="text-center text-gray-400 py-4">无</td></tr></tbody>
+      </table>
+    </div>
+    <!-- 设备 -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
+      <h3 class="font-semibold mb-3">已注册设备（插件实例）</h3>
+      <table>
+        <thead><tr><th>店铺</th><th>授权码</th><th>最后心跳</th><th>待执行</th><th>操作</th></tr></thead>
+        <tbody id="devs-tbody"><tr><td colspan="5" class="text-center text-gray-400 py-4">无</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-4 mt-4">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="font-semibold">命令队列（最近 100 条）</h3>
+      <button onclick="loadCommands()" class="btn btn-secondary text-xs">刷新</button>
+    </div>
+    <table>
+      <thead><tr><th>id</th><th>店铺</th><th>动作</th><th>状态</th><th>创建时间</th><th>完成时间</th><th>消息 / 结果</th></tr></thead>
+      <tbody id="cmds-tbody"><tr><td colspan="7" class="text-center text-gray-400 py-4">无</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 下发命令 Modal -->
+<div id="dispatch-modal" class="hidden fixed inset-0 z-40 modal-overlay flex items-center justify-center">
+  <div class="bg-white rounded-lg shadow-xl w-[560px] p-6">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold">向设备下发命令</h3>
+      <button onclick="closeModal('dispatch-modal')" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+    </div>
+    <input type="hidden" id="dispatch-device-id">
+    <div class="space-y-3">
+      <div><label class="text-sm">设备</label><input id="dispatch-device-name" class="input mt-1" disabled></div>
+      <div>
+        <label class="text-sm">动作</label>
+        <select id="dispatch-action" class="select mt-1">
+          <option value="fba_inventory">FBA 库存采集 (fba_inventory)</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-sm">参数 (JSON，留空走默认)</label>
+        <textarea id="dispatch-params" class="input mt-1 font-mono text-xs" rows="6"
+          placeholder='{"page_size":100,"max_pages":20}'></textarea>
+        <p class="text-xs text-gray-400 mt-1">默认 bootstrap_url = inventory-health（美国站），data_url = 该页内部 JSON 接口；如需切换 endpoint 在此覆盖。</p>
+      </div>
+    </div>
+    <div class="mt-4 flex justify-end gap-2">
+      <button onclick="closeModal('dispatch-modal')" class="btn btn-secondary">取消</button>
+      <button onclick="submitDispatch()" class="btn btn-primary">下发</button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══════ 系统设置 ═══════ -->
 <section id="tab-settings" class="tab-content hidden">
@@ -487,6 +553,7 @@ function switchTab(name) {
   else if (name === 'snapshots') loadSnapshots();
   else if (name === 'sources') loadSources();
   else if (name === 'channels') loadChannels();
+  else if (name === 'agents')   loadAgents();
   else if (name === 'settings') loadSettings();
 }
 
@@ -914,6 +981,86 @@ async function saveSettings() {
   try { await api('/api/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('已保存', 'success'); }
   catch (e) { toast(e.message, 'error'); }
 }
+
+// ═════════ 插件 Agent ═════════
+async function loadAgents() {
+  const [codes, devs] = await Promise.all([api('/api/auth-codes'), api('/api/agent-devices')]);
+  document.getElementById('codes-tbody').innerHTML = (codes.data || []).map(c => `
+    <tr>
+      <td><code class="text-sm font-mono">${escape(c.code)}</code></td>
+      <td>${escape(c.description || '-')}</td>
+      <td>${c.consumed_at ? `<span class="badge badge-resolved">已激活</span> <span class="text-xs text-gray-500">${escape(c.consumed_at)}</span>` : '<span class="badge badge-info">未激活</span>'}</td>
+      <td><button onclick="copyText('${escape(c.code)}')" class="text-blue-500 text-xs">复制</button> <button onclick="delAuthCode('${escape(c.code)}')" class="text-red-500 text-xs ml-2">删除</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="text-center text-gray-400 py-4">还没生成授权码</td></tr>';
+  document.getElementById('devs-tbody').innerHTML = (devs.data || []).map(d => `
+    <tr>
+      <td>${escape(d.name || '-')}<div class="text-xs text-gray-400">${escape(d.entity_id || '')}</div></td>
+      <td><code class="text-xs">${escape(d.auth_code || '')}</code></td>
+      <td class="text-xs">${escape(d.last_seen_at || '从未')}</td>
+      <td>${d.pending_count || 0}</td>
+      <td>
+        <button onclick="openDispatch(${d.id}, '${escape(d.name || '')}')" class="text-blue-500 text-xs">下发命令</button>
+        <button onclick="api('/api/agent-devices/${d.id}', { method: 'DELETE' }).then(loadAgents)" class="text-red-500 text-xs ml-2">删除</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="text-center text-gray-400 py-4">设备激活后会出现在这里</td></tr>';
+  loadCommands();
+}
+async function genAuthCode() {
+  const desc = prompt('为这个授权码起个说明（如：US-Main 店铺）');
+  if (desc == null) return;
+  try { const r = await api('/api/auth-codes', { method: 'POST', body: JSON.stringify({ description: desc }) });
+    toast('授权码：' + r.code, 'success'); loadAgents(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function delAuthCode(code) {
+  if (!confirm('删除授权码 ' + code + '？')) return;
+  try { await api('/api/auth-codes/' + code, { method: 'DELETE' }); toast('已删除', 'success'); loadAgents(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function loadCommands() {
+  const r = await api('/api/agent-commands?limit=100');
+  document.getElementById('cmds-tbody').innerHTML = (r.data || []).map(c => `
+    <tr>
+      <td>${c.id}</td>
+      <td>${escape(c.device_name || '#'+c.device_id)}</td>
+      <td><code class="text-xs">${escape(c.action)}</code></td>
+      <td>${cmdStatusBadge(c.status)}</td>
+      <td class="text-xs">${escape(c.created_at)}</td>
+      <td class="text-xs">${escape(c.finished_at || '-')}</td>
+      <td class="text-xs">${escape(c.message || '')} ${c.result ? `<span class="text-gray-400">${escape(c.result)}</span>` : ''}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="text-center text-gray-400 py-4">无</td></tr>';
+}
+function cmdStatusBadge(s) {
+  const map = {
+    pending: 'bg-amber-100 text-amber-700',
+    locked:  'bg-blue-100 text-blue-700',
+    done:    'bg-green-100 text-green-700',
+    failed:  'bg-red-100 text-red-700',
+  };
+  return `<span class="badge ${map[s] || 'bg-gray-100 text-gray-600'}">${escape(s)}</span>`;
+}
+function openDispatch(id, name) {
+  document.getElementById('dispatch-device-id').value = id;
+  document.getElementById('dispatch-device-name').value = name;
+  document.getElementById('dispatch-params').value = '';
+  document.getElementById('dispatch-action').value = 'fba_inventory';
+  openModal('dispatch-modal');
+}
+async function submitDispatch() {
+  const id = +document.getElementById('dispatch-device-id').value;
+  const action = document.getElementById('dispatch-action').value;
+  const paramsText = document.getElementById('dispatch-params').value.trim();
+  let params = {};
+  if (paramsText) { try { params = JSON.parse(paramsText); } catch (e) { return toast('参数 JSON 解析失败', 'error'); } }
+  try {
+    await api('/api/agent-commands', { method: 'POST', body: JSON.stringify({ device_id: id, action, params }) });
+    toast('已下发', 'success'); closeModal('dispatch-modal'); loadCommands();
+  } catch (e) { toast(e.message, 'error'); }
+}
+function copyText(t) { navigator.clipboard.writeText(t).then(() => toast('已复制：' + t, 'success')).catch(() => {}); }
 
 // ═════════ 工具 ═════════
 function escape(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }

@@ -179,4 +179,51 @@ INSERT OR IGNORE INTO data_sources (code, name, source_type) VALUES
   ('system', '业务系统当前值', 'system'),
   ('sp_api_inventory_summary', 'SP-API FBA 库存摘要', 'sp_api'),
   ('sp_api_inventory_report', 'SP-API FBA 库存报告', 'report'),
-  ('manual_audit', '人工对账录入', 'manual');
+  ('manual_audit', '人工对账录入', 'manual'),
+  ('ziniao_seller_central', '紫鸟插件 (Seller Central)', 'sp_api');
+
+-- ─────────────────────────────────────────────
+-- 9. 插件 Agent
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS auth_codes (
+  code TEXT PRIMARY KEY,
+  description TEXT DEFAULT '',
+  expected_marketplace_id TEXT,
+  consumed_at TEXT,
+  consumed_by_device_id INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS agent_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  auth_code TEXT,
+  entity_id TEXT,
+  marketplace_id TEXT,
+  advertiser_id TEXT,
+  advertiser_type TEXT,
+  device_token TEXT NOT NULL UNIQUE,
+  refresh_token TEXT,
+  token_expires_at TEXT,
+  last_seen_at TEXT,
+  last_status TEXT,
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_dev_token ON agent_devices(device_token);
+
+CREATE TABLE IF NOT EXISTS agent_commands (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_id INTEGER NOT NULL,
+  action TEXT NOT NULL,           -- fba_inventory / ...
+  params TEXT DEFAULT '{}',       -- 命令参数：endpoint / merchant_id / page_size 等
+  priority INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'pending',  -- pending / locked / done / failed
+  lock_id TEXT,
+  locked_at TEXT,
+  finished_at TEXT,
+  result TEXT,
+  message TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cmd_pending ON agent_commands(device_id, status, created_at);

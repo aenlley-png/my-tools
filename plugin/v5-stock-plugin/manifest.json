@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "V5 Plugin-STOCK",
+  "version": "1.0.0",
+  "description": "V5 Plugin - Amazon FBA 库存静默采集（与 V5 Plugin-AD 同骨架）",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_icon": "icons/icon48.png",
+    "default_title": "V5 Plugin-STOCK",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html"
+  },
+  "permissions": [
+    "cookies",
+    "tabs",
+    "notifications",
+    "storage",
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "ruleset_1", "enabled": true, "path": "rules.json" }
+    ]
+  }
+}

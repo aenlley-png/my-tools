@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>V5 Plugin-STOCK</title>
+<link rel="stylesheet" href="styles/popup.css">
+</head>
+<body>
+<div class="card" style="width:520px; min-height:420px;">
+
+  <!-- 未授权：输入 16 位授权码 -->
+  <div id="auth_div" class="card-body" style="display:none">
+    <div class="card-subtitle">插件尚未授权，请输入授权码</div>
+    <div class="input-group">
+      <input id="authcode_text" type="text" placeholder="16位授权码" maxlength="16" autocomplete="off">
+      <button id="authorization_btn" class="btn btn-primary"><span class="spinner sr-icon hide"></span>授权</button>
+    </div>
+    <div id="login_prompt_div" class="callout warning hide">
+      检测到未登录亚马逊账号，请先<a id="login_a" href="#">登录</a>（登录时勾选 Keep me signed in）
+    </div>
+    <div id="error_prompt_div" class="callout error hide"></div>
+  </div>
+
+  <!-- 已授权 -->
+  <div id="content_div" class="card-body" style="display:none">
+    <div class="card-subtitle row">
+      <div id="online_div" class="hide"><span class="dot dot-online"></span> 在线</div>
+      <div id="unlogin_div" class="hide">
+        <button id="checkState_btn" class="btn btn-sm btn-primary">验证登录</button>
+        <span class="muted">检测到未登录亚马逊账号，如已登录请点击</span>
+      </div>
+      <div id="offline_div" class="hide"><span class="dot dot-offline"></span> 插件已脱机，请联系管理员</div>
+      <div class="grow"></div>
+      <button id="runNow_btn"  class="btn btn-sm btn-success">立即执行</button>
+      <button id="logout_btn"  class="btn btn-sm btn-secondary">登出</button>
+    </div>
+    <div class="tabs">
+      <a class="tab active" data-tab="stock">FBA 库存采集</a>
+    </div>
+    <div id="stock_tab" class="tab-pane">
+      <div class="muted small">最近 30 条任务记录</div>
+      <ul id="stock_recorder_ul" class="list"></ul>
+    </div>
+  </div>
+
+</div>
+<script src="scripts/popup.js"></script>
+</body>
+</html>

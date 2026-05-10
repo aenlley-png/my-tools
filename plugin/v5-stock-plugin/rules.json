@@ -1,0 +1,6 @@
+[
+  { "id": 1, "priority": 1, "condition": { "urlFilter": "advertising.amazon.com*", "resourceTypes": ["main_frame","xmlhttprequest"] }, "action": { "type": "modifyHeaders", "requestHeaders": [{"header":"accept","operation":"set","value":"*/*"}] } },
+  { "id": 2, "priority": 2, "condition": { "urlFilter": "www.amazon.com*",          "resourceTypes": ["main_frame","xmlhttprequest"] }, "action": { "type": "modifyHeaders", "requestHeaders": [{"header":"accept","operation":"set","value":"*/*"}] } },
+  { "id": 3, "priority": 3, "condition": { "urlFilter": "sellercentral.amazon*",    "resourceTypes": ["main_frame","xmlhttprequest"] }, "action": { "type": "modifyHeaders", "requestHeaders": [{"header":"accept","operation":"set","value":"*/*"}] } },
+  { "id": 4, "priority": 4, "condition": { "urlFilter": "*",                        "resourceTypes": ["main_frame","xmlhttprequest"] }, "action": { "type": "modifyHeaders", "requestHeaders": [{"header":"accept","operation":"set","value":"*/*"}] } }
+]

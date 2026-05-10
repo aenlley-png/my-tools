@@ -1,0 +1,46 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; color: #333; background: #fafafa; }
+.card { padding: 16px; }
+.card-subtitle { color: #6c757d; margin-bottom: 12px; }
+.card-body { display: block; }
+.row { display: flex; align-items: center; gap: 8px; }
+.grow { flex: 1; }
+.muted { color: #888; }
+.small { font-size: 12px; }
+.hide { display: none !important; }
+
+.input-group { display: flex; gap: 0; margin-bottom: 8px; border: 1px solid #ced4da; border-radius: 4px; overflow: hidden; }
+.input-group input { flex: 1; border: 0; padding: 8px 10px; outline: none; font-size: 13px; }
+.input-group .btn { border-radius: 0; }
+
+.btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.btn-sm { padding: 3px 8px; font-size: 12px; }
+.btn-primary   { background: #2f80ed; color: #fff; }
+.btn-primary:hover   { background: #1366d6; }
+.btn-success   { background: #2ea043; color: #fff; }
+.btn-secondary { background: #e9ecef; color: #333; }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.callout { padding: 8px; border-radius: 4px; margin-top: 8px; font-size: 12px; }
+.callout.warning { background: #fff3cd; color: #664d03; }
+.callout.error   { background: #f8d7da; color: #842029; }
+
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.dot-online  { background: #2ea043; box-shadow: 0 0 0 2px rgba(46,160,67,.2); }
+.dot-offline { background: #d04a4a; }
+
+.tabs { display: flex; border-bottom: 1px solid #e0e0e0; margin: 12px 0 8px; }
+.tab { padding: 6px 12px; cursor: pointer; color: #666; }
+.tab.active { color: #2f80ed; border-bottom: 2px solid #2f80ed; }
+
+.list { list-style: none; max-height: 280px; overflow-y: auto; }
+.list li { padding: 6px 8px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.list li.ok   { background: #f1f8f3; }
+.list li.fail { background: #fcf2f2; }
+.badge { font-size: 11px; padding: 2px 6px; border-radius: 3px; background: #6c757d; color: #fff; }
+.list li.ok .badge   { background: #2ea043; }
+.list li.fail .badge { background: #d04a4a; }
+.action { font-weight: 600; }
+
+.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
