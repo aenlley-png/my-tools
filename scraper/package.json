@@ -1,0 +1,20 @@
+{
+  "name": "ziniao-amazon-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "通过紫鸟浏览器抓取亚马逊卖家后台数据，作为真值源推送到异常检测 Worker",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "once": "node index.js --once",
+    "list": "node index.js --list-shops"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "puppeteer-core": "^23.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

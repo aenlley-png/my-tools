@@ -1,0 +1,33 @@
+{
+  "ziniao": {
+    "_comment": "紫鸟浏览器开放接口本地地址。不同版本端口可能不同，常见 54200 / 22311；可在紫鸟 - 开放接口 中查看",
+    "apiBase": "http://127.0.0.1:54200",
+    "_comment_auth": "如启用了开放接口鉴权，把 userId / appKey 填上；多数本机版本不需要",
+    "auth": {
+      "userId": "",
+      "appKey": ""
+    }
+  },
+  "shops": [
+    {
+      "_comment": "browserOauth 是紫鸟里店铺的唯一 id；可先运行 `npm run list` 列出全部",
+      "browserOauth": "REPLACE_ME",
+      "name": "US-Main",
+      "region": "us",
+      "marketplaceId": "ATVPDKIKX0DER",
+      "tasks": ["fba_inventory"]
+    }
+  ],
+  "anomalyApi": {
+    "base": "https://anomaly-detector.example.workers.dev",
+    "token": ""
+  },
+  "snapshotSource": "ziniao_seller_central",
+  "schedule": {
+    "_comment": "intervalMinutes=0 表示只跑一次后退出（适合外部 cron 调用）",
+    "intervalMinutes": 60
+  },
+  "headless": false,
+  "perTaskTimeoutMs": 120000,
+  "humanDelayMs": [800, 2000]
+}
