@@ -24,7 +24,7 @@ export default {
     const path = url.pathname;
     const method = request.method;
 
-    if (method === 'OPTIONS') return cors('', 204);
+    if (method === 'OPTIONS') return cors('', 204, request);
 
     // ── 插件协议（v5-stock-plugin）：与业务系统已有 /plugin/... 同风格 ──
     // 这些端点使用 device_token，与 admin api_token 互不影响
@@ -147,16 +147,19 @@ export default {
 // 通用工具
 // ════════════════════════════════════════════════════════════
 
-function cors(body, status = 200) {
-  return new Response(body, {
-    status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
-  });
+function cors(body, status = 200, request) {
+  // 反射 Origin 而非用 *，以便客户端使用 credentials:'include' 时也能通过 CORS
+  const origin = request && request.headers.get('Origin');
+  const reqHeaders = request && request.headers.get('Access-Control-Request-Headers');
+  const headers = {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': origin || '*',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': reqHeaders || 'Content-Type, Authorization, pluginType, entityId, marketplaceId, advertiserId, advertiserType',
+    'Vary': 'Origin',
+  };
+  if (origin) headers['Access-Control-Allow-Credentials'] = 'true';
+  return new Response(body, { status, headers });
 }
 function corsJson(d, s = 200) { return cors(JSON.stringify(d), s); }
 function nowIso() { return new Date().toISOString().replace('T',' ').slice(0,19); }

@@ -23,10 +23,19 @@ const HttpClient = {
   asyncHttp(method, url, headers, body, cb) {
     const rulesObj = HttpClient.toRulesObj(headers || {}, url);
     chrome.declarativeNetRequest.updateDynamicRules(rulesObj, () => {
-      fetch(url, { method, mode: 'cors', credentials: 'include', body: body || undefined })
+      // 我们的后端 Worker 返 Access-Control-Allow-Origin:*，与 credentials:'include'
+      // 互不兼容（浏览器会丢弃响应）。仅 amazon 域需要带 cookie 抓页面，其它一律 omit。
+      let isAmazon = false;
+      try { isAmazon = /amazon\./i.test(new URL(url).hostname); } catch {}
+      fetch(url, {
+        method,
+        mode: 'cors',
+        credentials: isAmazon ? 'include' : 'omit',
+        body: body || undefined,
+      })
         .then(r => r.text())
         .then(t => cb(t, t))
-        .catch(e => cb(null, e));
+        .catch(e => { console.warn('[HttpClient] fetch failed:', method, url, e && e.message); cb(null, e); });
     });
   },
 
