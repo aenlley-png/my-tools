@@ -1,12 +1,12 @@
 status: success
-run_id: 25623715589
-run_url: https://github.com/aenlley-png/my-tools/actions/runs/25623715589
-trigger_sha: a6685369b3f4a11d6542c9d8a4a6ec1b5f6a7220
+run_id: 25623994158
+run_url: https://github.com/aenlley-png/my-tools/actions/runs/25623994158
+trigger_sha: ea2dfc42d869fa96513b2bc65ff8bf34721620a5
 actor: aenlley-png
-started_at: 2026-05-10T08:11:05Z
+started_at: 2026-05-10T08:26:13Z
 ---
 ── DEPLOY_INFO ──
-deployed_at:  2026-05-10T08:11:04Z
+deployed_at:  2026-05-10T08:26:13Z
 worker_url:   https://anomaly-detector.tinastocks.workers.dev
 db_name:      anomaly-db
 db_id:        734603b4-6b32-46ea-bb58-10b67e004af2
@@ -29,45 +29,76 @@ KV id: b0bcde3d2767416ba0668702c8e95bb0
       "served_by_colo": "LAX",
       "served_by_primary": true,
       "timings": {
-        "sql_duration_ms": 3.1278
+        "sql_duration_ms": 5.5861
       },
-      "duration": 3.1278,
-      "changes": 2,
-      "last_row_id": 15,
+      "duration": 5.5861,
+      "changes": 1,
+      "last_row_id": 0,
       "changed_db": true,
       "size_after": 126976,
       "rows_read": 1,
-      "rows_written": 3,
+      "rows_written": 1,
       "num_tables": 11,
       "total_attempts": 1
     }
   }
 ]
-── 5) 部署 Worker ──
+── 5a) 首次部署 Worker（捕获 URL）──
 
  ⛅️ wrangler 4.86.0 (update available 4.90.0)
 ─────────────────────────────────────────────
 
 Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
-Total Upload: 66.96 KiB / gzip: 14.68 KiB
-Your Worker has access to the following bindings:
-Binding                                           Resource          
-env.CACHE (b0bcde3d2767416ba0668702c8e95bb0)      KV Namespace      
-env.DB (anomaly-db)                               D1 Database       
+🌀 Building list of assets...
+✨ Read 2 files from the assets directory /home/runner/work/my-tools/my-tools/static
+🌀 Starting asset upload...
+🌀 Found 2 new or modified static assets to upload. Proceeding with upload...
++ /.gitkeep
++ /.gitignore
+Uploaded 1 of 2 assets
+Uploaded 2 of 2 assets
+✨ Success! Uploaded 2 files (1.20 sec)
 
-Uploaded anomaly-detector (2.76 sec)
-Deployed anomaly-detector triggers (0.82 sec)
+Total Upload: 68.98 KiB / gzip: 15.15 KiB
+Your Worker has access to the following bindings:
+Binding                                            Resource          
+env.CACHE (b0bcde3d2767416ba0668702c8e95bb0)       KV Namespace      
+env.DB (anomaly-db)                                D1 Database       
+env.ASSETS                                         Assets            
+
+Uploaded anomaly-detector (7.42 sec)
+Deployed anomaly-detector triggers (0.90 sec)
   https://anomaly-detector.tinastocks.workers.dev
   schedule: */5 * * * *
-Current Version ID: a71f00ac-85a7-42e5-b4a4-63bebd05ba50
+Current Version ID: e551764d-9094-462b-b979-bb9beb9fc560
 Worker URL: https://anomaly-detector.tinastocks.workers.dev
-── 6) 打包插件（注入 worker URL）──
+── 6) 打包插件 + 准备静态资源 ──
 SHOP5_URL_PROD → https://anomaly-detector.tinastocks.workers.dev
 已生成： /home/runner/work/my-tools/my-tools/dist/v5-stock-plugin.zip (22359 bytes, 26 files)
 在紫鸟浏览器中：扩展程序 - 加载已解压扩展程序，选择 dist/v5-stock-plugin/ 即可。
+static/ 内容：
+total 172
+drwxr-xr-x  2 runner runner  4096 May 10 08:25 .
+drwxr-xr-x 12 runner runner  4096 May 10 08:25 ..
+-rw-r--r--  1 runner runner    24 May 10 08:25 .gitignore
+-rw-r--r--  1 runner runner     0 May 10 08:25 .gitkeep
+-rw-r--r--  1 runner runner 69186 May 10 08:25 anomaly-monitor.html
+-rw-r--r--  1 runner runner 69186 May 10 08:25 index.html
+-rw-r--r--  1 runner runner 22359 May 10 08:25 v5-stock-plugin.zip
+── 5b) 重新部署（含静态资源）──
+Binding                                            Resource          
+env.CACHE (b0bcde3d2767416ba0668702c8e95bb0)       KV Namespace      
+env.DB (anomaly-db)                                D1 Database       
+env.ASSETS                                         Assets            
+
+Uploaded anomaly-detector (9.79 sec)
+Deployed anomaly-detector triggers (3.09 sec)
+  https://anomaly-detector.tinastocks.workers.dev
+  schedule: */5 * * * *
+Current Version ID: 4545b465-0a05-4565-b983-f5c7fd6cce12
 
 ═══════════════════════════════════════════════
-deployed_at:  2026-05-10T08:11:04Z
+deployed_at:  2026-05-10T08:26:13Z
 worker_url:   https://anomaly-detector.tinastocks.workers.dev
 db_name:      anomaly-db
 db_id:        734603b4-6b32-46ea-bb58-10b67e004af2
