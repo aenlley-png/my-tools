@@ -1,15 +1,11 @@
 name: Deploy Anomaly Detector to Cloudflare
 
 on:
-  workflow_dispatch:        # 手动触发
+  workflow_dispatch:        # 手动触发（默认分支）
   push:
-    branches: [main]
-    paths:
-      - 'anomaly-worker.js'
-      - 'anomaly-schema.sql'
-      - 'wrangler-anomaly.toml'
-      - 'tools/deploy.sh'
-      - 'plugin/v5-stock-plugin/**'
+    branches:
+      - main
+      - 'claude/**'         # 当前分支也能触发，方便首发部署
 
 permissions:
   contents: write           # 允许把更新后的 wrangler-anomaly.toml 提交回去
