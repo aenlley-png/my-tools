@@ -1215,24 +1215,31 @@ async function pluginStockUpload(env, request) {
   const params = safeParse(cmd.params, {});
   const sourceCode = params.source_code || 'ziniao_seller_central';
 
-  // FBA 库存：把 items 直接入 data_snapshots
-  if (ok && cmd.action === 'fba_inventory' && Array.isArray(b.items) && b.items.length) {
+  // 通用：把 items 里所有 fba_* / sales_* 字段写入 data_snapshots
+  // parent_asin / parent_sku 等文本字段保存到 raw_json
+  if (ok && Array.isArray(b.items) && b.items.length) {
     const fetchedAt = nowIso();
     const insert = env.DB.prepare(
       'INSERT INTO data_snapshots (source_code, scope_key, metric, value, raw_json, fetched_at) VALUES (?,?,?,?,?,?)'
     );
     const ops = [];
+    const metricRe = /^(fba_|sales_)/;
     for (const it of b.items) {
       const scope = it.asin || it.sku;
       if (!scope) continue;
-      const meta = JSON.stringify({ asin: it.asin, sku: it.sku, device_id: dev.id, device_name: dev.name });
-      for (const [metric, valKey] of [
-        ['fba_available', 'fba_available'], ['fba_reserved', 'fba_reserved'],
-        ['fba_inbound', 'fba_inbound'], ['fba_unfulfillable', 'fba_unfulfillable'],
-      ]) {
-        const v = it[valKey];
-        if (v == null) continue;
-        ops.push(insert.bind(sourceCode, String(scope), metric, Number(v), meta, fetchedAt));
+      const meta = JSON.stringify({
+        asin: it.asin || null, sku: it.sku || null,
+        parent_asin: it.parent_asin || null,
+        parent_sku: it.parent_sku || null,
+        title: it.title || null,
+        device_id: dev.id, device_name: dev.name,
+        action: cmd.action,
+      });
+      for (const [k, v] of Object.entries(it)) {
+        if (!metricRe.test(k) || v == null) continue;
+        const n = Number(v);
+        if (!Number.isFinite(n)) continue;
+        ops.push(insert.bind(sourceCode, String(scope), k, n, meta, fetchedAt));
       }
     }
     if (ops.length) await env.DB.batch(ops);
@@ -1291,45 +1298,105 @@ async function listAgentCommands(env, url) {
   const { results } = await env.DB.prepare(sql).bind(...args, limit).all();
   return corsJson({ ok: true, data: results || [] });
 }
-// 获取指定设备(店铺)最近一次拉取的全部 SKU/ASIN 库存（按 scope 聚合最新值）
+// 获取设备(店铺)的 FBA 管理视图：按父子树聚合，含库存 + 销量 + 可售天数
 async function listDeviceInventory(env, deviceId, url) {
   if (!deviceId) return corsJson({ ok: false, error: 'invalid id' }, 400);
   const days = +url.searchParams.get('days') || 7;
-  const limit = Math.min(+url.searchParams.get('limit') || 1000, 5000);
+  const limit = Math.min(+url.searchParams.get('limit') || 2000, 10000);
   const dev = await env.DB.prepare('SELECT * FROM agent_devices WHERE id=?').bind(deviceId).first();
   if (!dev) return corsJson({ ok: false, error: 'device not found' }, 404);
-  // 取近 N 天该设备的所有快照（按 raw_json.device_id 过滤）
+
   const { results } = await env.DB.prepare(
     `SELECT scope_key, metric, value, fetched_at, raw_json
      FROM data_snapshots
      WHERE source_code = 'ziniao_seller_central'
        AND json_extract(raw_json, '$.device_id') = ?
        AND fetched_at >= datetime('now', ?)
+       AND (metric LIKE 'fba_%' OR metric LIKE 'sales_%')
      ORDER BY scope_key, metric, fetched_at DESC
      LIMIT ?`
-  ).bind(deviceId, `-${days} day`, limit * 4).all();
+  ).bind(deviceId, `-${days} day`, limit * 8).all();
 
-  // 按 scope_key 聚合，每个 metric 取最新一条
+  // 1) 按 scope_key 聚合，每个 metric 取最新（ORDER BY DESC，第一次出现即最新）
   const map = new Map();
   for (const r of results || []) {
-    const key = r.scope_key;
-    let row = map.get(key);
+    let row = map.get(r.scope_key);
     if (!row) {
       const meta = safeParse(r.raw_json, {});
-      row = { asin: meta.asin || null, sku: meta.sku || null, scope_key: key,
-              fba_available: null, fba_reserved: null, fba_inbound: null, fba_unfulfillable: null,
-              latest_at: null };
-      map.set(key, row);
+      row = {
+        scope_key: r.scope_key,
+        asin: meta.asin || null,
+        sku: meta.sku || null,
+        parent_asin: meta.parent_asin || null,
+        parent_sku: meta.parent_sku || null,
+        title: meta.title || null,
+        latest_at: null,
+      };
+      map.set(r.scope_key, row);
     }
-    if (row[r.metric] == null) {  // 第一次出现 = 最新（已 ORDER BY fetched_at DESC）
+    if (row[r.metric] == null) {
       row[r.metric] = r.value;
       if (!row.latest_at || r.fetched_at > row.latest_at) row.latest_at = r.fetched_at;
     }
   }
-  const items = [...map.values()].sort((a, b) =>
-    String(a.asin || a.sku || '').localeCompare(String(b.asin || b.sku || ''))
-  );
-  return corsJson({ ok: true, device: { id: dev.id, name: dev.name, marketplace_id: dev.marketplace_id, last_seen_at: dev.last_seen_at }, items });
+  const items = [...map.values()];
+
+  // 2) 计算每行的派生字段
+  const computeDerived = (it) => {
+    // 兼容旧字段：fba_inbound 视为 inbound_shipped 的兜底
+    const shipped = it.fba_inbound_shipped ?? it.fba_inbound ?? 0;
+    const receiving = it.fba_inbound_receiving ?? 0;
+    it.fba_inbound_shipped = shipped;
+    it.fba_inbound_receiving = receiving;
+    it.fba_total = (it.fba_available || 0) + shipped + receiving;
+    if (it.sales_30d != null && it.sales_30d > 0 && it.fba_available != null) {
+      it.days_of_supply = +(it.fba_available / (it.sales_30d / 30)).toFixed(1);
+    } else {
+      it.days_of_supply = null;
+    }
+  };
+  for (const it of items) computeDerived(it);
+
+  // 3) 父子树构建
+  const byAsin = new Map();
+  for (const it of items) if (it.asin) byAsin.set(it.asin, it);
+  for (const it of items) it.children = [];
+  for (const it of items) {
+    const p = it.parent_asin && it.parent_asin !== it.asin ? it.parent_asin : null;
+    if (p && byAsin.has(p)) {
+      const parent = byAsin.get(p);
+      parent.children.push(it);
+      it._is_child = true;
+    }
+  }
+  // 父行：自身没有 parent / 或被多个 child 引用了
+  // 只展示根节点（不是 child 的），子节点放在 children 里
+  const roots = items.filter(it => !it._is_child);
+
+  // 4) 父行聚合：如果父行自身没有数据但有子，用子之和
+  const SUM_KEYS = ['fba_available','fba_reserved','fba_inbound_shipped','fba_inbound_receiving',
+                    'fba_unfulfillable','fba_total','sales_today','sales_yesterday','sales_30d'];
+  for (const r of roots) {
+    if (r.children.length) {
+      for (const k of SUM_KEYS) {
+        const sum = r.children.reduce((s, c) => s + (c[k] || 0), 0);
+        // 父行本身可能是 variation 占位，用 children 之和覆盖
+        if (sum > 0 || r[k] == null) r[k] = sum;
+      }
+      computeDerived(r);
+    }
+  }
+
+  // 5) 排序
+  const sortFn = (a, b) => String(a.asin || a.sku || '').localeCompare(String(b.asin || b.sku || ''));
+  roots.sort(sortFn);
+  for (const r of roots) r.children.sort(sortFn);
+
+  return corsJson({ ok: true,
+    device: { id: dev.id, name: dev.name, marketplace_id: dev.marketplace_id, last_seen_at: dev.last_seen_at },
+    days, total_skus: items.length, parent_count: roots.length,
+    items: roots,
+  });
 }
 
 async function createAgentCommand(env, request) {

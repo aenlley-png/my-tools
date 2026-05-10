@@ -43,6 +43,8 @@ const StockTask = {
       try {
         if (cmd.action === 'fba_inventory') {
           result = await StockService.fbaInventory(cmd.params || {});
+        } else if (cmd.action === 'sales_metrics') {
+          result = await StockService.salesMetrics(cmd.params || {});
         }
       } catch (e) {
         result = { status: 0, message: e.message, items: [] };

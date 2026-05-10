@@ -63,7 +63,7 @@
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="sources"   onclick="switchTab('sources')">数据源</button>
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="channels"  onclick="switchTab('channels')">通知渠道</button>
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="agents"    onclick="switchTab('agents')">插件Agent</button>
-      <button class="px-4 py-2 text-sm text-gray-500" data-tab="inventory" onclick="switchTab('inventory')">店铺库存</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="inventory" onclick="switchTab('inventory')">FBA 管理</button>
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="settings"  onclick="switchTab('settings')">系统设置</button>
     </nav>
   </div>
@@ -250,32 +250,46 @@
   </div>
 </section>
 
-<!-- ═══════ 店铺库存 ═══════ -->
+<!-- ═══════ FBA 管理 ═══════ -->
 <section id="tab-inventory" class="tab-content hidden">
-  <div class="flex items-center justify-between mb-3">
-    <div class="flex items-center gap-2">
-      <label class="text-sm">选择店铺：</label>
-      <select id="inv-device" class="select" onchange="loadInventory()" style="width: 280px"></select>
-      <label class="text-sm ml-3">最近</label>
-      <select id="inv-days" class="select" onchange="loadInventory()" style="width: 120px">
-        <option value="1">1 天</option>
-        <option value="3">3 天</option>
-        <option value="7" selected>7 天</option>
-        <option value="30">30 天</option>
-      </select>
-      <input type="text" id="inv-search" class="input ml-3" placeholder="按 ASIN/SKU 过滤" oninput="renderInventory()" style="width: 200px">
-    </div>
-    <div class="text-xs text-gray-500" id="inv-meta"></div>
+  <div class="flex items-center flex-wrap gap-2 mb-3">
+    <label class="text-sm">店铺：</label>
+    <select id="inv-device" class="select" onchange="loadInventory()" style="width: 240px"></select>
+    <label class="text-sm ml-3">视图：</label>
+    <select id="inv-view" class="select" onchange="renderInventory()" style="width: 100px">
+      <option value="parent" selected>父体</option>
+      <option value="variant">变体</option>
+    </select>
+    <label class="text-sm ml-3">销量窗口：</label>
+    <select id="inv-days" class="select" onchange="loadInventory()" style="width: 130px">
+      <option value="1">最近 1 天</option>
+      <option value="7">最近 7 天</option>
+      <option value="30" selected>最近 30 天</option>
+      <option value="60">最近 60 天</option>
+      <option value="90">最近 90 天</option>
+    </select>
+    <input type="text" id="inv-search-asin" class="input ml-3" placeholder="ASIN" oninput="renderInventory()" style="width: 140px">
+    <input type="text" id="inv-search-sku"  class="input"     placeholder="SKU"  oninput="renderInventory()" style="width: 140px">
+    <button onclick="loadInventory()" class="btn btn-secondary text-xs ml-auto">刷新</button>
+    <button onclick="dispatchInventoryAndSales()" class="btn btn-primary text-xs">立即拉取（下发命令）</button>
   </div>
-  <div class="bg-white rounded-lg shadow-sm border border-gray-100">
-    <table>
+  <div class="text-xs text-gray-500 mb-2" id="inv-meta">选择店铺以加载</div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100 overflow-x-auto">
+    <table class="min-w-full">
       <thead><tr>
-        <th>ASIN</th><th>SKU</th>
-        <th class="text-right">可售</th><th class="text-right">预留</th>
-        <th class="text-right">在途</th><th class="text-right">不可售</th>
-        <th class="text-right">合计</th><th>最后更新</th>
+        <th class="w-8"></th>
+        <th>SKU</th><th>ASIN</th>
+        <th class="text-right">今日销量</th>
+        <th class="text-right">昨天销量</th>
+        <th class="text-right">历史销量<span class="text-[10px] text-gray-400 ml-1" id="inv-hist-label">(30d)</span></th>
+        <th class="text-right">在售库存</th>
+        <th class="text-right">转运中</th>
+        <th class="text-right">待接收</th>
+        <th class="text-right">总库存</th>
+        <th class="text-right">可售天数</th>
+        <th>最后更新</th>
       </tr></thead>
-      <tbody id="inv-tbody"><tr><td colspan="8" class="text-center text-gray-400 py-6">选择店铺后显示</td></tr></tbody>
+      <tbody id="inv-tbody"><tr><td colspan="12" class="text-center text-gray-400 py-6">选择店铺后显示</td></tr></tbody>
     </table>
   </div>
 </section>
@@ -294,6 +308,7 @@
         <label class="text-sm">动作</label>
         <select id="dispatch-action" class="select mt-1">
           <option value="fba_inventory">FBA 库存采集 (fba_inventory)</option>
+          <option value="sales_metrics">销量采集 (sales_metrics)</option>
         </select>
       </div>
       <div>
@@ -1225,8 +1240,9 @@ async function submitDispatch() {
 }
 function copyText(t) { navigator.clipboard.writeText(t).then(() => toast('已复制：' + t, 'success')).catch(() => {}); }
 
-// ═════════ 店铺库存 ═════════
-let _invCache = { items: [], deviceId: null };
+// ═════════ FBA 管理 ═════════
+let _invCache = { tree: [], deviceId: null, expanded: new Set() };
+
 async function loadInventoryDevices() {
   const r = await api('/api/agent-devices');
   const sel = document.getElementById('inv-device');
@@ -1235,40 +1251,100 @@ async function loadInventoryDevices() {
     ? devs.map(d => `<option value="${d.id}">${escape(d.name || ('#' + d.id))} · ${escape(d.marketplace_id || '')}</option>`).join('')
     : '<option value="">（暂无激活的店铺）</option>';
   if (devs.length) loadInventory();
-  else document.getElementById('inv-tbody').innerHTML = '<tr><td colspan="8" class="text-center text-gray-400 py-6">没有已激活的店铺。先到「插件Agent」页生成授权码并在紫鸟里激活插件。</td></tr>';
+  else document.getElementById('inv-tbody').innerHTML = '<tr><td colspan="12" class="text-center text-gray-400 py-6">没有已激活的店铺。先到「插件Agent」页生成授权码并在紫鸟里激活插件。</td></tr>';
 }
+
 async function loadInventory() {
   const id = document.getElementById('inv-device').value;
   if (!id) return;
-  const days = document.getElementById('inv-days').value || 7;
-  document.getElementById('inv-tbody').innerHTML = '<tr><td colspan="8" class="text-center text-gray-400 py-6">加载中…</td></tr>';
-  const r = await api(`/api/agent-devices/${id}/inventory?days=${days}&limit=2000`);
-  _invCache = { items: r.items || [], deviceId: id };
-  document.getElementById('inv-meta').textContent =
-    `共 ${_invCache.items.length} 个 ASIN/SKU · 设备：${escape(r.device?.name || '-')} · 最近心跳：${escape(r.device?.last_seen_at || '-')}`;
+  const days = document.getElementById('inv-days').value || 30;
+  document.getElementById('inv-hist-label').textContent = `(${days}d)`;
+  document.getElementById('inv-tbody').innerHTML = '<tr><td colspan="12" class="text-center text-gray-400 py-6">加载中…</td></tr>';
+  try {
+    const r = await api(`/api/agent-devices/${id}/inventory?days=${days}&limit=5000`);
+    _invCache = { tree: r.items || [], deviceId: id, expanded: _invCache.expanded };
+    document.getElementById('inv-meta').textContent =
+      `${r.parent_count || 0} 个父 · 共 ${r.total_skus || 0} 个 SKU · 设备：${escape(r.device?.name || '-')} · 最近心跳：${escape(r.device?.last_seen_at || '-')}`;
+    renderInventory();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderInventory() {
+  const view = document.getElementById('inv-view').value;
+  const qa = (document.getElementById('inv-search-asin').value || '').trim().toUpperCase();
+  const qs = (document.getElementById('inv-search-sku').value  || '').trim().toUpperCase();
+
+  const matchItem = (it) =>
+    (!qa || (it.asin && it.asin.toUpperCase().includes(qa))) &&
+    (!qs || (it.sku  && it.sku.toUpperCase().includes(qs)));
+
+  const rows = [];
+  for (const p of _invCache.tree) {
+    const children = (p.children || []).filter(matchItem);
+    const parentMatch = matchItem(p);
+    if (view === 'variant') {
+      // 平铺：仅显示子项；若父本身没有 children 也作为单项展示
+      if (children.length) for (const c of children) rows.push(invRow(c, false, false, false));
+      else if (parentMatch) rows.push(invRow(p, false, false, false));
+    } else {
+      // 父体视图：父行 + 可展开的子行
+      const hasMatchingChild = children.length > 0;
+      if (parentMatch || hasMatchingChild) {
+        const isParent = (p.children || []).length > 0;
+        const isExpanded = _invCache.expanded.has(p.scope_key);
+        rows.push(invRow(p, isParent, isExpanded, true));
+        if (isExpanded) for (const c of (p.children || [])) {
+          if (matchItem(c) || hasMatchingChild && !qa && !qs) rows.push(invRow(c, false, false, false, true));
+        }
+      }
+    }
+  }
+  document.getElementById('inv-tbody').innerHTML =
+    rows.join('') || '<tr><td colspan="12" class="text-center text-gray-400 py-6">无数据</td></tr>';
+}
+
+function invRow(it, isParent, isExpanded, allowExpand, isChild = false) {
+  const expBtn = isParent && allowExpand
+    ? `<button onclick="toggleInvRow('${escape(it.scope_key)}')" class="text-blue-500 text-xs">${isExpanded ? '▼' : '▶'}</button>`
+    : '';
+  const indent = isChild ? 'pl-6 text-gray-700' : (isParent ? 'font-semibold' : '');
+  const lowStockCls = (it.fba_available != null && it.fba_available <= 5) ? 'text-red-600 font-semibold' : '';
+  const dosCls = (it.days_of_supply != null && it.days_of_supply <= 14) ? 'text-red-600 font-semibold'
+              : (it.days_of_supply != null && it.days_of_supply <= 30) ? 'text-amber-600' : '';
+  return `<tr class="${isChild ? 'bg-gray-50' : ''}">
+    <td class="text-center">${expBtn}</td>
+    <td class="text-xs ${indent}">${escape(it.sku || '-')}</td>
+    <td class="font-mono text-xs ${indent}">${escape(it.asin || '-')}</td>
+    <td class="text-right">${fmt(it.sales_today)}</td>
+    <td class="text-right">${fmt(it.sales_yesterday)}</td>
+    <td class="text-right">${fmt(it.sales_30d)}</td>
+    <td class="text-right ${lowStockCls}">${fmt(it.fba_available)}</td>
+    <td class="text-right text-blue-600">${fmt(it.fba_inbound_shipped)}</td>
+    <td class="text-right text-purple-600">${fmt(it.fba_inbound_receiving)}</td>
+    <td class="text-right font-semibold">${fmt(it.fba_total)}</td>
+    <td class="text-right ${dosCls}">${it.days_of_supply == null ? '-' : it.days_of_supply}</td>
+    <td class="text-xs text-gray-500">${escape((it.latest_at || '-').slice(5, 16))}</td>
+  </tr>`;
+}
+
+function toggleInvRow(scopeKey) {
+  if (_invCache.expanded.has(scopeKey)) _invCache.expanded.delete(scopeKey);
+  else _invCache.expanded.add(scopeKey);
   renderInventory();
 }
-function renderInventory() {
-  const q = (document.getElementById('inv-search').value || '').trim().toUpperCase();
-  const items = _invCache.items.filter(it =>
-    !q || (it.asin && it.asin.toUpperCase().includes(q)) || (it.sku && it.sku.toUpperCase().includes(q))
-  );
-  const tb = document.getElementById('inv-tbody');
-  tb.innerHTML = items.map(it => {
-    const sum = (it.fba_available || 0) + (it.fba_reserved || 0) + (it.fba_inbound || 0) + (it.fba_unfulfillable || 0);
-    return `<tr>
-      <td class="font-mono text-xs">${escape(it.asin || '-')}</td>
-      <td class="text-xs">${escape(it.sku || '-')}</td>
-      <td class="text-right ${(it.fba_available != null && it.fba_available <= 5) ? 'text-red-600 font-semibold' : ''}">${fmt(it.fba_available)}</td>
-      <td class="text-right text-gray-500">${fmt(it.fba_reserved)}</td>
-      <td class="text-right text-blue-600">${fmt(it.fba_inbound)}</td>
-      <td class="text-right text-amber-600">${fmt(it.fba_unfulfillable)}</td>
-      <td class="text-right font-semibold">${fmt(sum)}</td>
-      <td class="text-xs text-gray-500">${escape(it.latest_at || '-')}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="8" class="text-center text-gray-400 py-6">无数据</td></tr>';
+
+function fmt(v) { return v == null ? '-' : Number(v).toLocaleString(); }
+
+// 一键给当前店铺下发 fba_inventory + sales_metrics 两条命令
+async function dispatchInventoryAndSales() {
+  const id = +document.getElementById('inv-device').value;
+  if (!id) { toast('请先选择店铺', 'error'); return; }
+  try {
+    await api('/api/agent-commands', { method: 'POST', body: JSON.stringify({ device_id: id, action: 'fba_inventory', params: {}, priority: 1 }) });
+    await api('/api/agent-commands', { method: 'POST', body: JSON.stringify({ device_id: id, action: 'sales_metrics',  params: {}, priority: 1 }) });
+    toast('两条命令已下发，等插件下次 download（点 popup「立即执行」可立刻跑）', 'success');
+  } catch (e) { toast(e.message, 'error'); }
 }
-function fmt(v) { return v == null ? '-' : v.toLocaleString(); }
 
 // ═════════ 工具 ═════════
 function escape(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
