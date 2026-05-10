@@ -15,7 +15,9 @@
       "name": "US-Main",
       "region": "us",
       "marketplaceId": "ATVPDKIKX0DER",
-      "tasks": ["fba_inventory"]
+      "tasks": ["fba_inventory"],
+      "_comment_endpoints": "可选：跳过自动发现，直接固定 endpoint URL（首次自动发现命中后填进来更稳）",
+      "endpoints": {}
     }
   ],
   "anomalyApi": {
@@ -27,7 +29,10 @@
     "_comment": "intervalMinutes=0 表示只跑一次后退出（适合外部 cron 调用）",
     "intervalMinutes": 60
   },
-  "headless": false,
   "perTaskTimeoutMs": 120000,
-  "humanDelayMs": [800, 2000]
+  "maxPages": 200,
+  "interPageDelayMs": 120,
+  "endpoints": {
+    "_comment": "全局默认 endpoint（shop.endpoints 优先级更高）；留空走自动发现"
+  }
 }

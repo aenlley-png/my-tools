@@ -93,7 +93,9 @@ async function runCycle(cfg, ziniao) {
           const items = await fn(browser, {
             region: shop.region || 'us',
             perTaskTimeoutMs: cfg.perTaskTimeoutMs || 120000,
-            humanDelayMs: cfg.humanDelayMs || [800, 2000],
+            endpoint: shop.endpoints?.[taskName] || cfg.endpoints?.[taskName] || null,
+            maxPages: cfg.maxPages || 200,
+            interPageDelayMs: cfg.interPageDelayMs ?? 120,
           });
           const snapshots = toSnapshots(items, sourceCode, taskName);
           console.log(`${tag} ${taskName}: 提取 ${items.length} 条，转 ${snapshots.length} 条快照`);
