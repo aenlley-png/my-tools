@@ -43,6 +43,10 @@ export default {
     }
 
     if (!path.startsWith('/api/')) {
+      // 静态资源：仪表盘 / 插件 zip / 其它前端文件
+      if (env.ASSETS) {
+        try { return await env.ASSETS.fetch(request); } catch { /* fall through */ }
+      }
       return corsJson({ message: 'Anomaly Detector API. See /api/health.' });
     }
 
@@ -109,6 +113,7 @@ export default {
 
       if (path === '/api/agent-devices' && method === 'GET') return await listAgentDevices(env);
       if (path.match(/^\/api\/agent-devices\/\d+$/) && method === 'DELETE') return await deleteRow(env, 'agent_devices', extractId(path));
+      if (path.match(/^\/api\/agent-devices\/\d+\/inventory$/) && method === 'GET') return await listDeviceInventory(env, extractId(path), url);
 
       if (path === '/api/agent-commands' && method === 'GET')  return await listAgentCommands(env, url);
       if (path === '/api/agent-commands' && method === 'POST') return await createAgentCommand(env, request);
@@ -1220,14 +1225,14 @@ async function pluginStockUpload(env, request) {
     for (const it of b.items) {
       const scope = it.asin || it.sku;
       if (!scope) continue;
+      const meta = JSON.stringify({ asin: it.asin, sku: it.sku, device_id: dev.id, device_name: dev.name });
       for (const [metric, valKey] of [
         ['fba_available', 'fba_available'], ['fba_reserved', 'fba_reserved'],
         ['fba_inbound', 'fba_inbound'], ['fba_unfulfillable', 'fba_unfulfillable'],
       ]) {
         const v = it[valKey];
         if (v == null) continue;
-        ops.push(insert.bind(sourceCode, String(scope), metric, Number(v),
-          JSON.stringify({ asin: it.asin, sku: it.sku }), fetchedAt));
+        ops.push(insert.bind(sourceCode, String(scope), metric, Number(v), meta, fetchedAt));
       }
     }
     if (ops.length) await env.DB.batch(ops);
@@ -1286,6 +1291,47 @@ async function listAgentCommands(env, url) {
   const { results } = await env.DB.prepare(sql).bind(...args, limit).all();
   return corsJson({ ok: true, data: results || [] });
 }
+// 获取指定设备(店铺)最近一次拉取的全部 SKU/ASIN 库存（按 scope 聚合最新值）
+async function listDeviceInventory(env, deviceId, url) {
+  if (!deviceId) return corsJson({ ok: false, error: 'invalid id' }, 400);
+  const days = +url.searchParams.get('days') || 7;
+  const limit = Math.min(+url.searchParams.get('limit') || 1000, 5000);
+  const dev = await env.DB.prepare('SELECT * FROM agent_devices WHERE id=?').bind(deviceId).first();
+  if (!dev) return corsJson({ ok: false, error: 'device not found' }, 404);
+  // 取近 N 天该设备的所有快照（按 raw_json.device_id 过滤）
+  const { results } = await env.DB.prepare(
+    `SELECT scope_key, metric, value, fetched_at, raw_json
+     FROM data_snapshots
+     WHERE source_code = 'ziniao_seller_central'
+       AND json_extract(raw_json, '$.device_id') = ?
+       AND fetched_at >= datetime('now', ?)
+     ORDER BY scope_key, metric, fetched_at DESC
+     LIMIT ?`
+  ).bind(deviceId, `-${days} day`, limit * 4).all();
+
+  // 按 scope_key 聚合，每个 metric 取最新一条
+  const map = new Map();
+  for (const r of results || []) {
+    const key = r.scope_key;
+    let row = map.get(key);
+    if (!row) {
+      const meta = safeParse(r.raw_json, {});
+      row = { asin: meta.asin || null, sku: meta.sku || null, scope_key: key,
+              fba_available: null, fba_reserved: null, fba_inbound: null, fba_unfulfillable: null,
+              latest_at: null };
+      map.set(key, row);
+    }
+    if (row[r.metric] == null) {  // 第一次出现 = 最新（已 ORDER BY fetched_at DESC）
+      row[r.metric] = r.value;
+      if (!row.latest_at || r.fetched_at > row.latest_at) row.latest_at = r.fetched_at;
+    }
+  }
+  const items = [...map.values()].sort((a, b) =>
+    String(a.asin || a.sku || '').localeCompare(String(b.asin || b.sku || ''))
+  );
+  return corsJson({ ok: true, device: { id: dev.id, name: dev.name, marketplace_id: dev.marketplace_id, last_seen_at: dev.last_seen_at }, items });
+}
+
 async function createAgentCommand(env, request) {
   const b = await request.json();
   if (!b.device_id || !b.action) return corsJson({ ok: false, error: 'device_id/action required' }, 400);

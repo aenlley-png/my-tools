@@ -63,6 +63,7 @@
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="sources"   onclick="switchTab('sources')">数据源</button>
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="channels"  onclick="switchTab('channels')">通知渠道</button>
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="agents"    onclick="switchTab('agents')">插件Agent</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="inventory" onclick="switchTab('inventory')">店铺库存</button>
       <button class="px-4 py-2 text-sm text-gray-500" data-tab="settings"  onclick="switchTab('settings')">系统设置</button>
     </nav>
   </div>
@@ -217,7 +218,10 @@
     <!-- 授权码 -->
     <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="font-semibold">授权码（一店一码）</h3>
+        <div class="flex items-center gap-3">
+          <h3 class="font-semibold">授权码（一店一码）</h3>
+          <a id="dl-plugin" href="/v5-stock-plugin.zip" download class="btn btn-success text-xs">⬇ 下载紫鸟插件</a>
+        </div>
         <button onclick="genAuthCode()" class="btn btn-primary text-xs">+ 生成新授权码</button>
       </div>
       <table>
@@ -242,6 +246,36 @@
     <table>
       <thead><tr><th>id</th><th>店铺</th><th>动作</th><th>状态</th><th>创建时间</th><th>完成时间</th><th>消息 / 结果</th></tr></thead>
       <tbody id="cmds-tbody"><tr><td colspan="7" class="text-center text-gray-400 py-4">无</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ 店铺库存 ═══════ -->
+<section id="tab-inventory" class="tab-content hidden">
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex items-center gap-2">
+      <label class="text-sm">选择店铺：</label>
+      <select id="inv-device" class="select" onchange="loadInventory()" style="width: 280px"></select>
+      <label class="text-sm ml-3">最近</label>
+      <select id="inv-days" class="select" onchange="loadInventory()" style="width: 120px">
+        <option value="1">1 天</option>
+        <option value="3">3 天</option>
+        <option value="7" selected>7 天</option>
+        <option value="30">30 天</option>
+      </select>
+      <input type="text" id="inv-search" class="input ml-3" placeholder="按 ASIN/SKU 过滤" oninput="renderInventory()" style="width: 200px">
+    </div>
+    <div class="text-xs text-gray-500" id="inv-meta"></div>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100">
+    <table>
+      <thead><tr>
+        <th>ASIN</th><th>SKU</th>
+        <th class="text-right">可售</th><th class="text-right">预留</th>
+        <th class="text-right">在途</th><th class="text-right">不可售</th>
+        <th class="text-right">合计</th><th>最后更新</th>
+      </tr></thead>
+      <tbody id="inv-tbody"><tr><td colspan="8" class="text-center text-gray-400 py-6">选择店铺后显示</td></tr></tbody>
     </table>
   </div>
 </section>
@@ -579,9 +613,20 @@ const state = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+  // 自动识别：当 dashboard 由 worker 服务（http/https）时，API base 默认为同源；
+  // 仅在 file:// 本地打开时需要手动填
+  if (!state.apiBase && location.protocol.startsWith('http')) {
+    state.apiBase = location.origin;
+    localStorage.setItem('anom_api_base', state.apiBase);
+  }
   document.getElementById('api-base').value = state.apiBase;
   document.getElementById('api-token').value = state.apiToken;
-  if (state.apiBase) loadAll();
+  // 下载插件链接也跟着 origin 走
+  if (state.apiBase) {
+    const dl = document.getElementById('dl-plugin');
+    if (dl) dl.href = state.apiBase.replace(/\/$/, '') + '/v5-stock-plugin.zip';
+    loadAll();
+  }
 });
 
 function saveApiConfig() {
@@ -629,6 +674,7 @@ function switchTab(name) {
   else if (name === 'sources') loadSources();
   else if (name === 'channels') loadChannels();
   else if (name === 'agents')   loadAgents();
+  else if (name === 'inventory') loadInventoryDevices();
   else if (name === 'settings') loadSettings();
 }
 
@@ -1178,6 +1224,51 @@ async function submitDispatch() {
   } catch (e) { toast(e.message, 'error'); }
 }
 function copyText(t) { navigator.clipboard.writeText(t).then(() => toast('已复制：' + t, 'success')).catch(() => {}); }
+
+// ═════════ 店铺库存 ═════════
+let _invCache = { items: [], deviceId: null };
+async function loadInventoryDevices() {
+  const r = await api('/api/agent-devices');
+  const sel = document.getElementById('inv-device');
+  const devs = r.data || [];
+  sel.innerHTML = devs.length
+    ? devs.map(d => `<option value="${d.id}">${escape(d.name || ('#' + d.id))} · ${escape(d.marketplace_id || '')}</option>`).join('')
+    : '<option value="">（暂无激活的店铺）</option>';
+  if (devs.length) loadInventory();
+  else document.getElementById('inv-tbody').innerHTML = '<tr><td colspan="8" class="text-center text-gray-400 py-6">没有已激活的店铺。先到「插件Agent」页生成授权码并在紫鸟里激活插件。</td></tr>';
+}
+async function loadInventory() {
+  const id = document.getElementById('inv-device').value;
+  if (!id) return;
+  const days = document.getElementById('inv-days').value || 7;
+  document.getElementById('inv-tbody').innerHTML = '<tr><td colspan="8" class="text-center text-gray-400 py-6">加载中…</td></tr>';
+  const r = await api(`/api/agent-devices/${id}/inventory?days=${days}&limit=2000`);
+  _invCache = { items: r.items || [], deviceId: id };
+  document.getElementById('inv-meta').textContent =
+    `共 ${_invCache.items.length} 个 ASIN/SKU · 设备：${escape(r.device?.name || '-')} · 最近心跳：${escape(r.device?.last_seen_at || '-')}`;
+  renderInventory();
+}
+function renderInventory() {
+  const q = (document.getElementById('inv-search').value || '').trim().toUpperCase();
+  const items = _invCache.items.filter(it =>
+    !q || (it.asin && it.asin.toUpperCase().includes(q)) || (it.sku && it.sku.toUpperCase().includes(q))
+  );
+  const tb = document.getElementById('inv-tbody');
+  tb.innerHTML = items.map(it => {
+    const sum = (it.fba_available || 0) + (it.fba_reserved || 0) + (it.fba_inbound || 0) + (it.fba_unfulfillable || 0);
+    return `<tr>
+      <td class="font-mono text-xs">${escape(it.asin || '-')}</td>
+      <td class="text-xs">${escape(it.sku || '-')}</td>
+      <td class="text-right ${(it.fba_available != null && it.fba_available <= 5) ? 'text-red-600 font-semibold' : ''}">${fmt(it.fba_available)}</td>
+      <td class="text-right text-gray-500">${fmt(it.fba_reserved)}</td>
+      <td class="text-right text-blue-600">${fmt(it.fba_inbound)}</td>
+      <td class="text-right text-amber-600">${fmt(it.fba_unfulfillable)}</td>
+      <td class="text-right font-semibold">${fmt(sum)}</td>
+      <td class="text-xs text-gray-500">${escape(it.latest_at || '-')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="text-center text-gray-400 py-6">无数据</td></tr>';
+}
+function fmt(v) { return v == null ? '-' : v.toLocaleString(); }
 
 // ═════════ 工具 ═════════
 function escape(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }

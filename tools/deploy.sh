@@ -63,20 +63,28 @@ echo "  kv id       → $KV_ID"
 echo "── 4) 应用 schema（远端 D1）──"
 wrangler d1 execute "$DB_NAME" --file=anomaly-schema.sql --remote --yes 2>&1 | tail -20
 
-echo "── 5) 部署 Worker ──"
+echo "── 5a) 首次部署 Worker（捕获 URL）──"
 DEPLOY=$(wrangler deploy -c "$TOML" 2>&1)
 echo "$DEPLOY"
 WORKER_URL=$(echo "$DEPLOY" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | head -1 || true)
 if [ -z "$WORKER_URL" ]; then
-  # 退而求其次，从 toml name 拼一个
   NAME=$(grep -E '^name = ' "$TOML" | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
   WORKER_URL="https://${NAME}.workers.dev"
   echo "未能解析 URL，使用约定地址：$WORKER_URL"
 fi
 echo "Worker URL: $WORKER_URL"
 
-echo "── 6) 打包插件（注入 worker URL）──"
+echo "── 6) 打包插件 + 准备静态资源 ──"
 node tools/build-plugin.js --worker-url "$WORKER_URL"
+mkdir -p static
+cp anomaly-monitor.html static/index.html
+cp anomaly-monitor.html static/anomaly-monitor.html
+cp dist/v5-stock-plugin.zip static/v5-stock-plugin.zip
+echo "static/ 内容："
+ls -la static/
+
+echo "── 5b) 重新部署（含静态资源）──"
+wrangler deploy -c "$TOML" 2>&1 | tail -10
 
 mkdir -p dist
 cat > dist/DEPLOY_INFO.txt <<EOF
