@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>系统异常检测</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; font-weight: 600; }
+  .toast { animation: slideIn .3s ease-out, fadeOut .5s ease-in 2.5s forwards; }
+  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+  .modal-overlay { background: rgba(0,0,0,.5); backdrop-filter: blur(2px); }
+  .btn { @apply px-3 py-1.5 rounded text-sm font-medium transition-colors; }
+  .btn-primary   { @apply bg-blue-500   text-white hover:bg-blue-600; }
+  .btn-success   { @apply bg-green-500  text-white hover:bg-green-600; }
+  .btn-warning   { @apply bg-amber-500  text-white hover:bg-amber-600; }
+  .btn-danger    { @apply bg-red-500    text-white hover:bg-red-600; }
+  .btn-secondary { @apply bg-gray-200   text-gray-700 hover:bg-gray-300; }
+  .input  { @apply border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 w-full; }
+  .select { @apply border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white w-full; }
+  table  { @apply w-full text-sm; }
+  th { @apply bg-gray-50 px-3 py-2 text-left font-medium text-gray-600 border-b; }
+  td { @apply px-3 py-2 border-b border-gray-100 align-top; }
+  tr:hover td { @apply bg-blue-50; }
+  .badge { @apply inline-block px-2 py-0.5 rounded text-xs font-medium; }
+  .badge-info     { @apply bg-blue-100   text-blue-700; }
+  .badge-warning  { @apply bg-amber-100  text-amber-700; }
+  .badge-critical { @apply bg-red-100    text-red-700; }
+  .badge-open     { @apply bg-red-100    text-red-700; }
+  .badge-ack      { @apply bg-amber-100  text-amber-700; }
+  .badge-resolved { @apply bg-green-100  text-green-700; }
+  .badge-muted    { @apply bg-gray-100   text-gray-600; }
+  pre.json { @apply bg-gray-50 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all; }
+  .stat-card { @apply bg-white rounded-lg shadow-sm p-4 border border-gray-100; }
+</style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+
+<header class="bg-white shadow-sm border-b">
+  <div class="max-w-7xl mx-auto px-4">
+    <div class="flex items-center justify-between h-14">
+      <div class="flex items-center gap-3">
+        <h1 class="text-lg font-bold text-gray-800">系统异常检测</h1>
+        <span class="text-xs text-gray-400" id="api-status">API: 未连接</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="api-base" class="input text-xs" placeholder="API Base URL (如 https://anomaly.xxx.workers.dev)" style="width: 360px">
+        <input id="api-token" class="input text-xs" placeholder="Token（可选）" style="width: 140px">
+        <button onclick="saveApiConfig()" class="btn btn-secondary text-xs">保存</button>
+        <button onclick="initDB()" class="btn btn-secondary text-xs">初始化DB</button>
+        <button onclick="runAll()" class="btn btn-primary text-xs">立即检测</button>
+      </div>
+    </div>
+    <nav class="flex gap-0 -mb-px">
+      <button class="px-4 py-2 text-sm tab-active" data-tab="overview"  onclick="switchTab('overview')">概览</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="anomalies" onclick="switchTab('anomalies')">异常告警</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="rules"     onclick="switchTab('rules')">检测规则</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="runs"      onclick="switchTab('runs')">策略执行</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="snapshots" onclick="switchTab('snapshots')">数据快照</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="sources"   onclick="switchTab('sources')">数据源</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="channels"  onclick="switchTab('channels')">通知渠道</button>
+      <button class="px-4 py-2 text-sm text-gray-500" data-tab="settings"  onclick="switchTab('settings')">系统设置</button>
+    </nav>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 py-4">
+
+<!-- ═══════ 概览 ═══════ -->
+<section id="tab-overview" class="tab-content">
+  <div class="grid grid-cols-4 gap-4 mb-4">
+    <div class="stat-card"><div class="text-xs text-gray-500">未处理异常</div><div class="text-2xl font-bold text-red-600 mt-1" id="ov-open">-</div></div>
+    <div class="stat-card"><div class="text-xs text-gray-500">严重异常</div><div class="text-2xl font-bold text-red-700 mt-1" id="ov-critical">-</div></div>
+    <div class="stat-card"><div class="text-xs text-gray-500">24 小时内异常</div><div class="text-2xl font-bold text-amber-600 mt-1" id="ov-today">-</div></div>
+    <div class="stat-card"><div class="text-xs text-gray-500">活跃规则</div><div class="text-2xl font-bold text-blue-600 mt-1" id="ov-rules">-</div></div>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
+    <h3 class="font-semibold mb-2">最近 10 条异常</h3>
+    <table>
+      <thead><tr><th>时间</th><th>规则</th><th>类型</th><th>对象</th><th>指标</th><th>级别</th><th>说明</th></tr></thead>
+      <tbody id="ov-recent"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ 异常告警 ═══════ -->
+<section id="tab-anomalies" class="tab-content hidden">
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex gap-2">
+      <select id="anom-status" class="select" onchange="loadAnomalies()">
+        <option value="open">未处理</option>
+        <option value="ack">已确认</option>
+        <option value="resolved">已解决</option>
+        <option value="muted">已忽略</option>
+        <option value="">全部</option>
+      </select>
+      <select id="anom-severity" class="select" onchange="loadAnomalies()">
+        <option value="">全部级别</option>
+        <option value="critical">严重</option>
+        <option value="warning">告警</option>
+        <option value="info">提示</option>
+      </select>
+    </div>
+    <button onclick="loadAnomalies()" class="btn btn-secondary">刷新</button>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100">
+    <table>
+      <thead><tr>
+        <th>时间</th><th>规则</th><th>类型</th><th>对象</th><th>指标</th>
+        <th>期望/实际</th><th>偏差</th><th>级别</th><th>状态</th><th>操作</th>
+      </tr></thead>
+      <tbody id="anom-tbody"><tr><td colspan="10" class="text-center text-gray-400 py-6">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ 检测规则 ═══════ -->
+<section id="tab-rules" class="tab-content hidden">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-lg font-semibold">检测规则</h3>
+    <button class="btn btn-primary" onclick="openRuleModal()">+ 新建规则</button>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100">
+    <table>
+      <thead><tr>
+        <th>名称</th><th>类型</th><th>范围</th><th>指标</th><th>源 A / B</th>
+        <th>容差</th><th>级别</th><th>启用</th><th>操作</th>
+      </tr></thead>
+      <tbody id="rules-tbody"><tr><td colspan="9" class="text-center text-gray-400 py-6">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ 策略执行 ═══════ -->
+<section id="tab-runs" class="tab-content hidden">
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex gap-2 items-center">
+      <input id="run-strategy-id" class="input" placeholder="策略 id（留空=全部）" style="width: 160px">
+      <select id="run-status" class="select" style="width: 140px">
+        <option value="">全部状态</option>
+        <option value="ok">ok</option>
+        <option value="skipped">skipped</option>
+        <option value="error">error</option>
+        <option value="timeout">timeout</option>
+      </select>
+      <button onclick="loadRuns()" class="btn btn-secondary">刷新</button>
+    </div>
+    <span class="text-xs text-gray-500">业务系统通过 POST /api/strategy-runs 上报</span>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100">
+    <table>
+      <thead><tr>
+        <th>计划/开始</th><th>策略</th><th>对象</th><th>状态</th>
+        <th>条件</th><th>动作</th><th>计算值/实际值</th><th>错误</th>
+      </tr></thead>
+      <tbody id="runs-tbody"><tr><td colspan="8" class="text-center text-gray-400 py-6">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ 数据快照 ═══════ -->
+<section id="tab-snapshots" class="tab-content hidden">
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex gap-2">
+      <input id="snap-source" class="input" placeholder="source code" style="width: 200px">
+      <input id="snap-scope"  class="input" placeholder="scope_key (ASIN/SKU)" style="width: 200px">
+      <input id="snap-metric" class="input" placeholder="metric" style="width: 200px">
+      <button onclick="loadSnapshots()" class="btn btn-secondary">查询</button>
+    </div>
+    <button onclick="openSnapModal()" class="btn btn-primary">+ 手工录入</button>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100">
+    <table>
+      <thead><tr>
+        <th>时间</th><th>源</th><th>对象</th><th>指标</th><th>值</th><th>原始数据</th>
+      </tr></thead>
+      <tbody id="snap-tbody"><tr><td colspan="6" class="text-center text-gray-400 py-6">输入条件后查询</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ 数据源 ═══════ -->
+<section id="tab-sources" class="tab-content hidden">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-lg font-semibold">数据源</h3>
+    <button class="btn btn-primary" onclick="openSourceModal()">+ 新建数据源</button>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100">
+    <table>
+      <thead><tr><th>code</th><th>名称</th><th>类型</th><th>启用</th><th>操作</th></tr></thead>
+      <tbody id="sources-tbody"><tr><td colspan="5" class="text-center text-gray-400 py-6">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ 通知渠道 ═══════ -->
+<section id="tab-channels" class="tab-content hidden">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-lg font-semibold">通知渠道</h3>
+    <button class="btn btn-primary" onclick="openChannelModal()">+ 新建渠道</button>
+  </div>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100">
+    <table>
+      <thead><tr><th>名称</th><th>类型</th><th>Webhook URL</th><th>启用</th><th>操作</th></tr></thead>
+      <tbody id="ch-tbody"><tr><td colspan="5" class="text-center text-gray-400 py-6">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════ 系统设置 ═══════ -->
+<section id="tab-settings" class="tab-content hidden">
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 max-w-2xl">
+    <h3 class="text-lg font-semibold mb-4">系统设置</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="text-sm text-gray-600">默认企业微信 Webhook</label>
+        <input id="set-webhook" class="input mt-1">
+        <p class="text-xs text-gray-400 mt-1">规则未指定通知渠道时使用此 webhook</p>
+      </div>
+      <div>
+        <label class="text-sm text-gray-600">API Token（写接口鉴权，留空=不校验）</label>
+        <input id="set-token" class="input mt-1">
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        <div><label class="text-sm text-gray-600">快照保留天数</label><input id="set-snap-days" class="input mt-1" type="number" min="1"></div>
+        <div><label class="text-sm text-gray-600">异常保留天数</label><input id="set-anom-days" class="input mt-1" type="number" min="1"></div>
+        <div><label class="text-sm text-gray-600">检测日志天数</label><input id="set-run-days"  class="input mt-1" type="number" min="1"></div>
+      </div>
+      <button onclick="saveSettings()" class="btn btn-primary">保存设置</button>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ─── 规则编辑 Modal ─── -->
+<div id="rule-modal" class="hidden fixed inset-0 z-40 modal-overlay flex items-center justify-center">
+  <div class="bg-white rounded-lg shadow-xl w-[640px] max-h-[85vh] overflow-y-auto p-6">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold" id="rule-modal-title">新建检测规则</h3>
+      <button onclick="closeModal('rule-modal')" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+    </div>
+    <input type="hidden" id="rule-id">
+    <div class="grid grid-cols-2 gap-3">
+      <div class="col-span-2"><label class="text-sm text-gray-600">名称*</label><input id="rule-name" class="input mt-1"></div>
+      <div class="col-span-2"><label class="text-sm text-gray-600">说明</label><input id="rule-desc" class="input mt-1"></div>
+      <div>
+        <label class="text-sm text-gray-600">类型*</label>
+        <select id="rule-type" class="select mt-1" onchange="onRuleTypeChange()">
+          <option value="cross_source">跨源比对（数据一致性）</option>
+          <option value="conservation">守恒检查（库存平衡）</option>
+          <option value="staleness">数据过期</option>
+          <option value="sudden_jump">异常跳变</option>
+          <option value="strategy_heartbeat">策略心跳（应运行未运行）</option>
+          <option value="strategy_outcome">策略结果偏差</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-sm text-gray-600">级别</label>
+        <select id="rule-severity" class="select mt-1">
+          <option value="critical">严重</option>
+          <option value="warning" selected>告警</option>
+          <option value="info">提示</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-sm text-gray-600">范围</label>
+        <select id="rule-scope-type" class="select mt-1">
+          <option value="all">全部出现过的对象</option>
+          <option value="list">指定列表</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-sm text-gray-600">指定对象（逗号分隔，仅 list）</label>
+        <input id="rule-scope-keys" class="input mt-1" placeholder="B001,B002">
+      </div>
+      <div class="col-span-2 grid grid-cols-3 gap-3 rule-data-fields">
+        <div>
+          <label class="text-sm text-gray-600">指标 metric</label>
+          <input id="rule-metric" class="input mt-1" placeholder="fba_available">
+        </div>
+        <div>
+          <label class="text-sm text-gray-600">源 A（系统值）</label>
+          <input id="rule-source-a" class="input mt-1" placeholder="system">
+        </div>
+        <div>
+          <label class="text-sm text-gray-600">源 B（真值，仅跨源）</label>
+          <input id="rule-source-b" class="input mt-1" placeholder="sp_api_inventory_summary">
+        </div>
+      </div>
+      <div class="rule-tolerance-fields">
+        <label class="text-sm text-gray-600">绝对容差</label>
+        <input id="rule-tol-abs" class="input mt-1" type="number" step="0.01" value="0">
+      </div>
+      <div class="rule-tolerance-fields">
+        <label class="text-sm text-gray-600">百分比容差 (%)</label>
+        <input id="rule-tol-pct" class="input mt-1" type="number" step="0.1" value="0">
+      </div>
+      <div class="rule-staleness-fields hidden">
+        <label class="text-sm text-gray-600">过期阈值 (分钟)</label>
+        <input id="rule-stale-min" class="input mt-1" type="number" value="60">
+      </div>
+      <div class="rule-jump-fields hidden">
+        <label class="text-sm text-gray-600">跳变阈值 (%)</label>
+        <input id="rule-jump-pct" class="input mt-1" type="number" value="50">
+      </div>
+      <div class="rule-strategy-fields hidden">
+        <label class="text-sm text-gray-600">策略 id</label>
+        <input id="rule-strategy-id" class="input mt-1" type="number">
+      </div>
+      <div class="rule-strategy-fields hidden">
+        <label class="text-sm text-gray-600">期望最大间隔 (分钟)</label>
+        <input id="rule-expected-interval" class="input mt-1" type="number">
+      </div>
+      <div>
+        <label class="text-sm text-gray-600">通知频率限制 (秒)</label>
+        <input id="rule-rate-limit" class="input mt-1" type="number" value="600">
+      </div>
+      <div>
+        <label class="text-sm text-gray-600">通知渠道 id (逗号)</label>
+        <input id="rule-channels" class="input mt-1" placeholder="留空使用默认 webhook">
+      </div>
+      <div class="col-span-2">
+        <label class="text-sm text-gray-600">扩展配置 (JSON)</label>
+        <textarea id="rule-config" class="input mt-1 font-mono text-xs" rows="3" placeholder='{"lookback_minutes":1440}'></textarea>
+      </div>
+      <div class="col-span-2">
+        <label class="text-sm"><input type="checkbox" id="rule-active" checked> 启用</label>
+      </div>
+    </div>
+    <div class="mt-4 flex justify-end gap-2">
+      <button onclick="closeModal('rule-modal')" class="btn btn-secondary">取消</button>
+      <button onclick="saveRule()" class="btn btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 数据源 Modal ─── -->
+<div id="source-modal" class="hidden fixed inset-0 z-40 modal-overlay flex items-center justify-center">
+  <div class="bg-white rounded-lg shadow-xl w-[480px] p-6">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold" id="source-modal-title">新建数据源</h3>
+      <button onclick="closeModal('source-modal')" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+    </div>
+    <input type="hidden" id="src-id">
+    <div class="space-y-3">
+      <div><label class="text-sm text-gray-600">code（唯一）*</label><input id="src-code" class="input mt-1"></div>
+      <div><label class="text-sm text-gray-600">名称*</label><input id="src-name" class="input mt-1"></div>
+      <div>
+        <label class="text-sm text-gray-600">类型</label>
+        <select id="src-type" class="select mt-1">
+          <option value="system">业务系统</option>
+          <option value="sp_api">SP-API 实时</option>
+          <option value="report">SP-API 报告</option>
+          <option value="manual">人工录入</option>
+          <option value="custom">自定义</option>
+        </select>
+      </div>
+      <div><label class="text-sm"><input type="checkbox" id="src-active" checked> 启用</label></div>
+    </div>
+    <div class="mt-4 flex justify-end gap-2">
+      <button onclick="closeModal('source-modal')" class="btn btn-secondary">取消</button>
+      <button onclick="saveSource()" class="btn btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 通道 Modal ─── -->
+<div id="channel-modal" class="hidden fixed inset-0 z-40 modal-overlay flex items-center justify-center">
+  <div class="bg-white rounded-lg shadow-xl w-[480px] p-6">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold" id="channel-modal-title">新建通知渠道</h3>
+      <button onclick="closeModal('channel-modal')" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+    </div>
+    <input type="hidden" id="ch-id">
+    <div class="space-y-3">
+      <div><label class="text-sm text-gray-600">名称*</label><input id="ch-name" class="input mt-1"></div>
+      <div>
+        <label class="text-sm text-gray-600">类型</label>
+        <select id="ch-type" class="select mt-1">
+          <option value="wechat">企业微信</option>
+          <option value="webhook">通用 Webhook</option>
+        </select>
+      </div>
+      <div><label class="text-sm text-gray-600">Webhook URL*</label><input id="ch-url" class="input mt-1"></div>
+      <div><label class="text-sm"><input type="checkbox" id="ch-active" checked> 启用</label></div>
+    </div>
+    <div class="mt-4 flex justify-end gap-2">
+      <button onclick="testCurrentChannel()" class="btn btn-warning">发送测试</button>
+      <button onclick="closeModal('channel-modal')" class="btn btn-secondary">取消</button>
+      <button onclick="saveChannel()" class="btn btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 手工快照 Modal ─── -->
+<div id="snap-modal" class="hidden fixed inset-0 z-40 modal-overlay flex items-center justify-center">
+  <div class="bg-white rounded-lg shadow-xl w-[480px] p-6">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold">手工录入快照（对账）</h3>
+      <button onclick="closeModal('snap-modal')" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+    </div>
+    <div class="space-y-3">
+      <div><label class="text-sm text-gray-600">source_code*</label><input id="man-source" class="input mt-1" value="manual_audit"></div>
+      <div><label class="text-sm text-gray-600">scope_key (ASIN/SKU)*</label><input id="man-scope" class="input mt-1"></div>
+      <div><label class="text-sm text-gray-600">metric*</label><input id="man-metric" class="input mt-1" placeholder="fba_available"></div>
+      <div><label class="text-sm text-gray-600">value*</label><input id="man-value" class="input mt-1" type="number" step="0.01"></div>
+    </div>
+    <div class="mt-4 flex justify-end gap-2">
+      <button onclick="closeModal('snap-modal')" class="btn btn-secondary">取消</button>
+      <button onclick="saveSnap()" class="btn btn-primary">提交</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 异常详情 Modal ─── -->
+<div id="anom-modal" class="hidden fixed inset-0 z-40 modal-overlay flex items-center justify-center">
+  <div class="bg-white rounded-lg shadow-xl w-[640px] max-h-[85vh] overflow-y-auto p-6">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold">异常详情</h3>
+      <button onclick="closeModal('anom-modal')" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+    </div>
+    <div id="anom-detail-body" class="space-y-2 text-sm"></div>
+  </div>
+</div>
+
+<script>
+// ═════════ 全局状态 ═════════
+const state = {
+  apiBase: localStorage.getItem('anom_api_base') || '',
+  apiToken: localStorage.getItem('anom_api_token') || '',
+  rules: [],
+  channels: [],
+  sources: [],
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('api-base').value = state.apiBase;
+  document.getElementById('api-token').value = state.apiToken;
+  if (state.apiBase) loadAll();
+});
+
+function saveApiConfig() {
+  state.apiBase = document.getElementById('api-base').value.trim().replace(/\/$/, '');
+  state.apiToken = document.getElementById('api-token').value.trim();
+  localStorage.setItem('anom_api_base', state.apiBase);
+  localStorage.setItem('anom_api_token', state.apiToken);
+  toast('已保存', 'success');
+  loadAll();
+}
+
+async function api(path, opts = {}) {
+  if (!state.apiBase) { toast('请先配置 API Base URL', 'error'); throw new Error('no api base'); }
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (state.apiToken) headers['Authorization'] = `Bearer ${state.apiToken}`;
+  const resp = await fetch(state.apiBase + path, { ...opts, headers });
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok || json.ok === false) throw new Error(json.error || resp.statusText);
+  document.getElementById('api-status').textContent = 'API: 已连接';
+  document.getElementById('api-status').className = 'text-xs text-green-500';
+  return json;
+}
+
+function toast(msg, kind = 'info') {
+  const el = document.createElement('div');
+  const cls = kind === 'success' ? 'bg-green-500' : kind === 'error' ? 'bg-red-500' : 'bg-blue-500';
+  el.className = `toast ${cls} text-white px-4 py-2 rounded shadow text-sm`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+function switchTab(name) {
+  document.querySelectorAll('[data-tab]').forEach(b => {
+    b.classList.toggle('tab-active', b.dataset.tab === name);
+    b.classList.toggle('text-gray-500', b.dataset.tab !== name);
+  });
+  document.querySelectorAll('.tab-content').forEach(s => s.classList.add('hidden'));
+  document.getElementById(`tab-${name}`).classList.remove('hidden');
+  if (name === 'overview') loadOverview();
+  else if (name === 'anomalies') loadAnomalies();
+  else if (name === 'rules') loadRules();
+  else if (name === 'runs') loadRuns();
+  else if (name === 'snapshots') loadSnapshots();
+  else if (name === 'sources') loadSources();
+  else if (name === 'channels') loadChannels();
+  else if (name === 'settings') loadSettings();
+}
+
+function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+// ═════════ 顶层操作 ═════════
+async function initDB() {
+  if (!confirm('对该 API 执行初始化（建表 / 种子数据）？')) return;
+  try { const r = await api('/api/init-db', { method: 'POST' }); toast('初始化完成：' + (r.statements || 0) + ' 条', 'success'); loadAll(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function runAll() {
+  try { const r = await api('/api/detect/all', { method: 'POST' });
+    toast(`检测完成：规则 ${r.result.rules}，异常 ${r.result.total_anomalies}`, 'success');
+    loadOverview(); loadAnomalies();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function loadAll() {
+  await loadOverview().catch(() => {});
+  await loadSources().catch(() => {});
+  await loadChannels().catch(() => {});
+}
+
+// ═════════ 概览 ═════════
+async function loadOverview() {
+  const r = await api('/api/overview');
+  document.getElementById('ov-open').textContent = r.data.open_count;
+  document.getElementById('ov-critical').textContent = r.data.critical_count;
+  document.getElementById('ov-today').textContent = r.data.today_count;
+  document.getElementById('ov-rules').textContent = r.data.active_rules;
+  const tb = document.getElementById('ov-recent');
+  tb.innerHTML = (r.data.recent || []).map(a => `
+    <tr>
+      <td class="text-xs text-gray-500">${a.detected_at}</td>
+      <td>${escape(a.rule_name || '-')}</td>
+      <td><code class="text-xs">${a.rule_type}</code></td>
+      <td>${escape(a.scope_key || '-')}</td>
+      <td>${escape(a.metric || '-')}</td>
+      <td><span class="badge badge-${a.severity}">${sevText(a.severity)}</span></td>
+      <td class="text-xs">${escape(a.message || '')}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="text-center text-gray-400 py-4">暂无</td></tr>';
+}
+
+// ═════════ 异常 ═════════
+async function loadAnomalies() {
+  const status = document.getElementById('anom-status').value;
+  const sev = document.getElementById('anom-severity').value;
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (sev) params.set('severity', sev);
+  params.set('limit', '200');
+  const r = await api('/api/anomalies?' + params);
+  const tb = document.getElementById('anom-tbody');
+  tb.innerHTML = (r.data || []).map(a => `
+    <tr>
+      <td class="text-xs text-gray-500">${a.detected_at}</td>
+      <td>${escape(a.rule_name || '-')}</td>
+      <td><code class="text-xs">${a.rule_type}</code></td>
+      <td>${escape(a.scope_key || '-')}</td>
+      <td>${escape(a.metric || '-')}</td>
+      <td class="text-xs">${a.expected_value ?? '-'} → ${a.actual_value ?? '-'}</td>
+      <td class="text-xs">${a.diff_pct != null ? Number(a.diff_pct).toFixed(1) + '%' : '-'}</td>
+      <td><span class="badge badge-${a.severity}">${sevText(a.severity)}</span></td>
+      <td><span class="badge badge-${a.status}">${statusText(a.status)}</span></td>
+      <td class="whitespace-nowrap">
+        <button onclick='showAnomDetail(${JSON.stringify(a).replace(/'/g, '&#39;')})' class="text-blue-500 text-xs">详情</button>
+        ${a.status === 'open' ? `<button onclick="setAnomStatus(${a.id},'ack')" class="text-amber-600 text-xs ml-2">确认</button>` : ''}
+        ${a.status !== 'resolved' ? `<button onclick="setAnomStatus(${a.id},'resolved')" class="text-green-600 text-xs ml-2">解决</button>` : ''}
+        ${a.status !== 'muted' ? `<button onclick="setAnomStatus(${a.id},'muted')" class="text-gray-500 text-xs ml-2">忽略</button>` : ''}
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="10" class="text-center text-gray-400 py-6">无数据</td></tr>';
+}
+async function setAnomStatus(id, st) {
+  try { await api(`/api/anomalies/${id}/${st === 'ack' ? 'ack' : st === 'resolved' ? 'resolve' : 'mute'}`, {
+    method: 'POST', body: JSON.stringify({ user: 'web' }),
+  }); toast('已更新', 'success'); loadAnomalies(); loadOverview(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+function showAnomDetail(a) {
+  const ctx = (() => { try { return JSON.parse(a.context || '{}'); } catch { return {}; }})();
+  const html = `
+    <div><b>规则：</b>${escape(a.rule_name || '-')} <code class="text-xs">${a.rule_type}</code></div>
+    <div><b>对象：</b>${escape(a.scope_key || '-')} / <b>指标：</b>${escape(a.metric || '-')}</div>
+    <div><b>级别：</b><span class="badge badge-${a.severity}">${sevText(a.severity)}</span> <b>状态：</b><span class="badge badge-${a.status}">${statusText(a.status)}</span></div>
+    <div><b>期望：</b>${a.expected_value ?? '-'} <b>实际：</b>${a.actual_value ?? '-'}</div>
+    <div><b>偏差：</b>${a.diff_abs ?? '-'} (${a.diff_pct != null ? Number(a.diff_pct).toFixed(2) + '%' : '-'})</div>
+    <div><b>检出时间：</b>${a.detected_at}</div>
+    <div><b>通知次数：</b>${a.notify_count} <b>最近通知：</b>${a.last_notified_at || '-'}</div>
+    <div class="mt-2"><b>消息：</b><br>${escape(a.message || '')}</div>
+    <div class="mt-2"><b>上下文：</b><pre class="json">${escape(JSON.stringify(ctx, null, 2))}</pre></div>
+    ${a.notes ? `<div class="mt-2"><b>备注：</b>${escape(a.notes)}</div>` : ''}
+  `;
+  document.getElementById('anom-detail-body').innerHTML = html;
+  openModal('anom-modal');
+}
+
+// ═════════ 规则 ═════════
+async function loadRules() {
+  const r = await api('/api/rules');
+  state.rules = r.data || [];
+  const tb = document.getElementById('rules-tbody');
+  tb.innerHTML = state.rules.map(rl => `
+    <tr>
+      <td class="font-medium">${escape(rl.name)}<div class="text-xs text-gray-400">${escape(rl.description || '')}</div></td>
+      <td><code class="text-xs">${rl.rule_type}</code></td>
+      <td class="text-xs">${rl.scope_type === 'all' ? '全部' : (safeJson(rl.scope_keys, []).join(', ') || '空')}</td>
+      <td class="text-xs">${escape(rl.metric || '-')}</td>
+      <td class="text-xs">${escape(rl.source_a || '-')}<br>${escape(rl.source_b || '')}</td>
+      <td class="text-xs">${rl.tolerance_abs}/${rl.tolerance_pct}%</td>
+      <td><span class="badge badge-${rl.severity}">${sevText(rl.severity)}</span></td>
+      <td>${rl.is_active ? '✓' : '✗'}</td>
+      <td class="whitespace-nowrap">
+        <button onclick="runRule(${rl.id})" class="text-blue-500 text-xs">立即运行</button>
+        <button onclick="editRule(${rl.id})" class="text-gray-600 text-xs ml-2">编辑</button>
+        <button onclick="deleteRule(${rl.id})" class="text-red-500 text-xs ml-2">删除</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="9" class="text-center text-gray-400 py-6">无规则</td></tr>';
+}
+function openRuleModal() {
+  document.getElementById('rule-modal-title').textContent = '新建检测规则';
+  ['rule-id','rule-name','rule-desc','rule-metric','rule-source-a','rule-source-b',
+   'rule-scope-keys','rule-strategy-id','rule-expected-interval','rule-channels','rule-config']
+    .forEach(id => document.getElementById(id).value = '');
+  document.getElementById('rule-tol-abs').value = 0;
+  document.getElementById('rule-tol-pct').value = 0;
+  document.getElementById('rule-stale-min').value = 60;
+  document.getElementById('rule-jump-pct').value = 50;
+  document.getElementById('rule-rate-limit').value = 600;
+  document.getElementById('rule-type').value = 'cross_source';
+  document.getElementById('rule-severity').value = 'warning';
+  document.getElementById('rule-scope-type').value = 'all';
+  document.getElementById('rule-active').checked = true;
+  onRuleTypeChange();
+  openModal('rule-modal');
+}
+function editRule(id) {
+  const rl = state.rules.find(r => r.id === id);
+  if (!rl) return;
+  document.getElementById('rule-modal-title').textContent = '编辑规则';
+  document.getElementById('rule-id').value = rl.id;
+  document.getElementById('rule-name').value = rl.name;
+  document.getElementById('rule-desc').value = rl.description || '';
+  document.getElementById('rule-type').value = rl.rule_type;
+  document.getElementById('rule-severity').value = rl.severity;
+  document.getElementById('rule-scope-type').value = rl.scope_type;
+  document.getElementById('rule-scope-keys').value = safeJson(rl.scope_keys, []).join(',');
+  document.getElementById('rule-metric').value = rl.metric || '';
+  document.getElementById('rule-source-a').value = rl.source_a || '';
+  document.getElementById('rule-source-b').value = rl.source_b || '';
+  document.getElementById('rule-tol-abs').value = rl.tolerance_abs;
+  document.getElementById('rule-tol-pct').value = rl.tolerance_pct;
+  document.getElementById('rule-stale-min').value = rl.staleness_minutes;
+  document.getElementById('rule-jump-pct').value = rl.jump_pct;
+  document.getElementById('rule-strategy-id').value = rl.strategy_id || '';
+  document.getElementById('rule-expected-interval').value = rl.expected_interval_minutes || '';
+  document.getElementById('rule-rate-limit').value = rl.rate_limit_seconds || 600;
+  document.getElementById('rule-channels').value = safeJson(rl.notify_channel_ids, []).join(',');
+  document.getElementById('rule-config').value = rl.config || '{}';
+  document.getElementById('rule-active').checked = !!rl.is_active;
+  onRuleTypeChange();
+  openModal('rule-modal');
+}
+function onRuleTypeChange() {
+  const t = document.getElementById('rule-type').value;
+  document.querySelectorAll('.rule-staleness-fields').forEach(e => e.classList.toggle('hidden', t !== 'staleness'));
+  document.querySelectorAll('.rule-jump-fields').forEach(e => e.classList.toggle('hidden', t !== 'sudden_jump'));
+  document.querySelectorAll('.rule-strategy-fields').forEach(e =>
+    e.classList.toggle('hidden', !['strategy_heartbeat','strategy_outcome'].includes(t)));
+}
+async function saveRule() {
+  const id = document.getElementById('rule-id').value;
+  const body = {
+    name: document.getElementById('rule-name').value.trim(),
+    description: document.getElementById('rule-desc').value,
+    rule_type: document.getElementById('rule-type').value,
+    severity: document.getElementById('rule-severity').value,
+    scope_type: document.getElementById('rule-scope-type').value,
+    scope_keys: document.getElementById('rule-scope-keys').value.split(',').map(s => s.trim()).filter(Boolean),
+    metric: document.getElementById('rule-metric').value.trim(),
+    source_a: document.getElementById('rule-source-a').value.trim(),
+    source_b: document.getElementById('rule-source-b').value.trim(),
+    tolerance_abs: +document.getElementById('rule-tol-abs').value || 0,
+    tolerance_pct: +document.getElementById('rule-tol-pct').value || 0,
+    staleness_minutes: +document.getElementById('rule-stale-min').value || 0,
+    jump_pct: +document.getElementById('rule-jump-pct').value || 0,
+    strategy_id: +document.getElementById('rule-strategy-id').value || null,
+    expected_interval_minutes: +document.getElementById('rule-expected-interval').value || 0,
+    rate_limit_seconds: +document.getElementById('rule-rate-limit').value || 600,
+    notify_channel_ids: document.getElementById('rule-channels').value.split(',').map(s => +s.trim()).filter(Boolean),
+    config: safeJson(document.getElementById('rule-config').value, {}),
+    is_active: document.getElementById('rule-active').checked ? 1 : 0,
+  };
+  if (!body.name || !body.rule_type) { toast('名称、类型必填', 'error'); return; }
+  try {
+    await api(id ? `/api/rules/${id}` : '/api/rules', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+    toast('已保存', 'success'); closeModal('rule-modal'); loadRules();
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function runRule(id) {
+  try { const r = await api(`/api/rules/${id}/run`, { method: 'POST' });
+    toast(`已运行：异常 ${r.result.anomaly_count}`, 'success'); loadAnomalies(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function deleteRule(id) {
+  if (!confirm('确认删除？')) return;
+  try { await api(`/api/rules/${id}`, { method: 'DELETE' }); toast('已删除', 'success'); loadRules(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+// ═════════ 策略执行 ═════════
+async function loadRuns() {
+  const sid = document.getElementById('run-strategy-id').value.trim();
+  const status = document.getElementById('run-status').value;
+  const params = new URLSearchParams();
+  if (sid) params.set('strategy_id', sid);
+  if (status) params.set('status', status);
+  params.set('limit', '200');
+  const r = await api('/api/strategy-runs?' + params);
+  const tb = document.getElementById('runs-tbody');
+  tb.innerHTML = (r.data || []).map(x => `
+    <tr>
+      <td class="text-xs">${x.scheduled_at || ''}<br><span class="text-gray-400">${x.started_at || ''}</span></td>
+      <td>${x.strategy_id} <span class="text-xs text-gray-500">${escape(x.strategy_name || '')}</span></td>
+      <td>${escape(x.scope_key || '-')}</td>
+      <td>${runStatusBadge(x.status)}</td>
+      <td>${x.condition_met == null ? '-' : (x.condition_met ? '✓' : '✗')}</td>
+      <td>${x.action_executed == null ? '-' : (x.action_executed ? '✓' : '✗')}</td>
+      <td class="text-xs">${x.computed_value ?? '-'} → ${x.applied_value ?? '-'}</td>
+      <td class="text-xs text-red-500">${escape(x.error_message || '')}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="8" class="text-center text-gray-400 py-6">无数据</td></tr>';
+}
+
+// ═════════ 数据快照 ═════════
+async function loadSnapshots() {
+  const params = new URLSearchParams();
+  const s = document.getElementById('snap-source').value.trim();
+  const k = document.getElementById('snap-scope').value.trim();
+  const m = document.getElementById('snap-metric').value.trim();
+  if (s) params.set('source', s);
+  if (k) params.set('scope_key', k);
+  if (m) params.set('metric', m);
+  params.set('limit', '200');
+  const r = await api('/api/snapshots?' + params);
+  const tb = document.getElementById('snap-tbody');
+  tb.innerHTML = (r.data || []).map(x => `
+    <tr>
+      <td class="text-xs text-gray-500">${x.fetched_at}</td>
+      <td><code class="text-xs">${escape(x.source_code)}</code></td>
+      <td>${escape(x.scope_key)}</td>
+      <td>${escape(x.metric)}</td>
+      <td class="font-medium">${x.value}</td>
+      <td class="text-xs text-gray-400 max-w-xs truncate" title="${escape(x.raw_json || '')}">${escape((x.raw_json || '').slice(0, 80))}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="text-center text-gray-400 py-6">无数据</td></tr>';
+}
+function openSnapModal() {
+  ['man-scope','man-metric','man-value'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('man-source').value = 'manual_audit';
+  openModal('snap-modal');
+}
+async function saveSnap() {
+  const body = {
+    source_code: document.getElementById('man-source').value.trim(),
+    scope_key: document.getElementById('man-scope').value.trim(),
+    metric: document.getElementById('man-metric').value.trim(),
+    value: +document.getElementById('man-value').value,
+  };
+  if (!body.source_code || !body.scope_key || !body.metric) { toast('字段必填', 'error'); return; }
+  try { await api('/api/snapshots', { method: 'POST', body: JSON.stringify(body) });
+    toast('已录入', 'success'); closeModal('snap-modal'); loadSnapshots(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+// ═════════ 数据源 ═════════
+async function loadSources() {
+  const r = await api('/api/data-sources');
+  state.sources = r.data || [];
+  const tb = document.getElementById('sources-tbody');
+  tb.innerHTML = state.sources.map(s => `
+    <tr>
+      <td><code class="text-xs">${escape(s.code)}</code></td>
+      <td>${escape(s.name)}</td>
+      <td>${s.source_type}</td>
+      <td>${s.is_active ? '✓' : '✗'}</td>
+      <td>
+        <button onclick="editSource(${s.id})" class="text-gray-600 text-xs">编辑</button>
+        <button onclick="deleteSource(${s.id})" class="text-red-500 text-xs ml-2">删除</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="text-center text-gray-400 py-6">无数据源</td></tr>';
+}
+function openSourceModal() {
+  ['src-id','src-code','src-name'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('src-type').value = 'system';
+  document.getElementById('src-active').checked = true;
+  document.getElementById('source-modal-title').textContent = '新建数据源';
+  openModal('source-modal');
+}
+function editSource(id) {
+  const s = state.sources.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('source-modal-title').textContent = '编辑数据源';
+  document.getElementById('src-id').value = s.id;
+  document.getElementById('src-code').value = s.code;
+  document.getElementById('src-name').value = s.name;
+  document.getElementById('src-type').value = s.source_type;
+  document.getElementById('src-active').checked = !!s.is_active;
+  openModal('source-modal');
+}
+async function saveSource() {
+  const id = document.getElementById('src-id').value;
+  const body = {
+    code: document.getElementById('src-code').value.trim(),
+    name: document.getElementById('src-name').value.trim(),
+    source_type: document.getElementById('src-type').value,
+    is_active: document.getElementById('src-active').checked ? 1 : 0,
+  };
+  if (!body.code || !body.name) { toast('code/name 必填', 'error'); return; }
+  try { await api(id ? `/api/data-sources/${id}` : '/api/data-sources',
+    { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+    toast('已保存', 'success'); closeModal('source-modal'); loadSources(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function deleteSource(id) {
+  if (!confirm('确认删除？')) return;
+  try { await api(`/api/data-sources/${id}`, { method: 'DELETE' }); toast('已删除', 'success'); loadSources(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+// ═════════ 通知渠道 ═════════
+async function loadChannels() {
+  const r = await api('/api/channels');
+  state.channels = r.data || [];
+  const tb = document.getElementById('ch-tbody');
+  tb.innerHTML = state.channels.map(c => `
+    <tr>
+      <td>${escape(c.name)}</td>
+      <td>${c.channel_type}</td>
+      <td class="text-xs text-gray-500 max-w-md truncate" title="${escape(c.webhook_url)}">${escape(c.webhook_url || '-')}</td>
+      <td>${c.is_active ? '✓' : '✗'}</td>
+      <td>
+        <button onclick="testChannel(${c.id})" class="text-amber-600 text-xs">测试</button>
+        <button onclick="editChannel(${c.id})" class="text-gray-600 text-xs ml-2">编辑</button>
+        <button onclick="deleteChannel(${c.id})" class="text-red-500 text-xs ml-2">删除</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="text-center text-gray-400 py-6">无渠道</td></tr>';
+}
+function openChannelModal() {
+  ['ch-id','ch-name','ch-url'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('ch-type').value = 'wechat';
+  document.getElementById('ch-active').checked = true;
+  document.getElementById('channel-modal-title').textContent = '新建通知渠道';
+  openModal('channel-modal');
+}
+function editChannel(id) {
+  const c = state.channels.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('channel-modal-title').textContent = '编辑通知渠道';
+  document.getElementById('ch-id').value = c.id;
+  document.getElementById('ch-name').value = c.name;
+  document.getElementById('ch-type').value = c.channel_type;
+  document.getElementById('ch-url').value = c.webhook_url;
+  document.getElementById('ch-active').checked = !!c.is_active;
+  openModal('channel-modal');
+}
+async function saveChannel() {
+  const id = document.getElementById('ch-id').value;
+  const body = {
+    name: document.getElementById('ch-name').value.trim(),
+    channel_type: document.getElementById('ch-type').value,
+    webhook_url: document.getElementById('ch-url').value.trim(),
+    is_active: document.getElementById('ch-active').checked ? 1 : 0,
+  };
+  if (!body.name || !body.webhook_url) { toast('名称、URL 必填', 'error'); return; }
+  try { await api(id ? `/api/channels/${id}` : '/api/channels',
+    { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+    toast('已保存', 'success'); closeModal('channel-modal'); loadChannels(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function deleteChannel(id) {
+  if (!confirm('确认删除？')) return;
+  try { await api(`/api/channels/${id}`, { method: 'DELETE' }); toast('已删除', 'success'); loadChannels(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function testChannel(id) {
+  try { const r = await api('/api/channels/test', { method: 'POST', body: JSON.stringify({ id }) });
+    toast(r.ok ? '已发送测试' : '发送失败', r.ok ? 'success' : 'error'); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function testCurrentChannel() {
+  const body = {
+    channel_type: document.getElementById('ch-type').value,
+    webhook_url: document.getElementById('ch-url').value.trim(),
+  };
+  if (!body.webhook_url) { toast('请先填写 URL', 'error'); return; }
+  try { const r = await api('/api/channels/test', { method: 'POST', body: JSON.stringify(body) });
+    toast(r.ok ? '已发送测试' : '发送失败', r.ok ? 'success' : 'error'); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+// ═════════ 设置 ═════════
+async function loadSettings() {
+  const r = await api('/api/settings');
+  document.getElementById('set-webhook').value = r.data.default_wechat_webhook || '';
+  document.getElementById('set-token').value = r.data.api_token || '';
+  document.getElementById('set-snap-days').value = r.data.snapshot_retention_days || 30;
+  document.getElementById('set-anom-days').value = r.data.anomaly_retention_days || 180;
+  document.getElementById('set-run-days').value = r.data.detection_run_retention_days || 14;
+}
+async function saveSettings() {
+  const body = {
+    default_wechat_webhook: document.getElementById('set-webhook').value.trim(),
+    api_token: document.getElementById('set-token').value.trim(),
+    snapshot_retention_days: +document.getElementById('set-snap-days').value || 30,
+    anomaly_retention_days: +document.getElementById('set-anom-days').value || 180,
+    detection_run_retention_days: +document.getElementById('set-run-days').value || 14,
+  };
+  try { await api('/api/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('已保存', 'success'); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+// ═════════ 工具 ═════════
+function escape(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function safeJson(s, d) { try { return typeof s === 'string' ? JSON.parse(s) : s; } catch { return d; } }
+function sevText(s) { return s === 'critical' ? '严重' : s === 'warning' ? '告警' : '提示'; }
+function statusText(s) { return { open:'未处理', ack:'已确认', resolved:'已解决', muted:'已忽略' }[s] || s; }
+function runStatusBadge(s) {
+  const cls = s === 'ok' ? 'bg-green-100 text-green-700'
+            : s === 'error' ? 'bg-red-100 text-red-700'
+            : s === 'skipped' ? 'bg-amber-100 text-amber-700'
+            : 'bg-gray-100 text-gray-600';
+  return `<span class="badge ${cls}">${s || '-'}</span>`;
+}
+</script>
+</body>
+</html>

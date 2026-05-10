@@ -1,0 +1,25 @@
+# 异常检测 Worker 单独的 wrangler 配置
+# 用法：wrangler deploy -c wrangler-anomaly.toml
+#
+# 部署前请：
+#   1) wrangler d1 create anomaly-db                      # 创建 D1，复制 database_id 填到下面
+#   2) wrangler kv:namespace create anomaly-cache         # 创建 KV，复制 id 填到下面
+#   3) wrangler d1 execute anomaly-db --file=anomaly-schema.sql --remote
+#   4) wrangler deploy -c wrangler-anomaly.toml
+
+name = "anomaly-detector"
+main = "anomaly-worker.js"
+compatibility_date = "2024-12-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "anomaly-db"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "REPLACE_WITH_YOUR_KV_ID"
+
+# 每 5 分钟扫描一次（覆盖大多数业务节奏，且 staleness/heartbeat 检测更敏感）
+[triggers]
+crons = ["*/5 * * * *"]
