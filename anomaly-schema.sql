@@ -174,6 +174,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('anomaly_retention_days', '180'),
   ('detection_run_retention_days', '14'),
   ('api_token', ''),
+  ('plugin_pull_interval_minutes', '1440'),
   ('sp_api_enabled', '0'),
   ('sp_api_client_id', ''),
   ('sp_api_client_secret', ''),

@@ -278,13 +278,51 @@
 
 <!-- ═══════ 系统设置 ═══════ -->
 <section id="tab-settings" class="tab-content hidden">
-  <!-- SP-API 凭证（系统值来源） -->
+  <!-- 紫鸟拉取频率 -->
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 max-w-2xl mb-4">
+    <h3 class="text-lg font-semibold mb-3">紫鸟插件拉取频率</h3>
+    <p class="text-xs text-gray-500 mb-3">
+      插件在每次 <code class="text-[11px]">/plugin/stock/inventory/download</code> 时按这里的间隔重置 alarm。
+      默认 1440 分钟 = 1 天 1 次。改完保存即生效，下一次插件 download 自动跟上。
+    </p>
+    <div class="flex items-end gap-3">
+      <div class="flex-1">
+        <label class="text-sm">间隔 (分钟)</label>
+        <input id="set-pull-interval" class="input mt-1" type="number" min="5" placeholder="1440">
+      </div>
+      <button onclick="savePullInterval()" class="btn btn-primary">保存</button>
+    </div>
+    <p class="text-xs text-gray-400 mt-2" id="pull-interval-hint">提示：1440 = 1 天，60 = 1 小时，5 = 5 分钟（紧急排查时用）</p>
+  </div>
+
+  <!-- 业务系统对接说明 -->
+  <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 max-w-2xl mb-4">
+    <h3 class="text-lg font-semibold mb-3">业务系统数据接入（"系统值"来源）</h3>
+    <p class="text-xs text-gray-500 mb-2">让你们的业务系统按以下格式 POST 到 Worker，即可参与跨源比对：</p>
+    <pre class="json text-[11px]">POST <span id="biz-endpoint">[Worker URL]</span>/api/snapshots
+Authorization: Bearer &lt;system 设置里的 api_token，可空&gt;
+Content-Type: application/json
+
+{
+  "items": [
+    {"source_code":"system","scope_key":"B0XXXXXX","metric":"fba_available","value":120},
+    {"source_code":"system","scope_key":"B0XXXXXX","metric":"fba_reserved","value":3}
+  ]
+}</pre>
+    <p class="text-xs text-gray-400 mt-2">
+      一次最多 200 条；scope_key 用 ASIN 或 SKU；metric 用
+      <code>fba_available / fba_reserved / fba_inbound / fba_unfulfillable</code>。
+      默认规则已经按 <code>source=system</code> 配好，业务系统推数据后自动生效。
+    </p>
+  </div>
+
+  <!-- SP-API 凭证（可选 —— 业务系统未对接前的兜底） -->
   <div class="bg-white rounded-lg shadow-sm border border-gray-100 p-6 max-w-2xl mb-4">
     <div class="flex items-center justify-between mb-4">
-      <h3 class="text-lg font-semibold">SP-API 拉取器（"系统值"来源）</h3>
+      <h3 class="text-lg font-semibold">SP-API 拉取器 <span class="text-xs text-gray-400 font-normal">（可选 / 备用）</span></h3>
       <span id="sp-status" class="text-xs text-gray-400">未配置</span>
     </div>
-    <p class="text-xs text-gray-500 mb-3">配置后，Worker 会按设定间隔自动从 SP-API 拉取 FBA 库存，作为跨源比对的"系统值"。无需依赖外部业务系统。</p>
+    <p class="text-xs text-gray-500 mb-3">业务系统未对接前的兜底来源；填了也只在勾选"启用"时才工作。优先走业务系统对接。</p>
     <div class="space-y-3">
       <div><label class="text-sm">LWA Client ID</label><input id="sp-cid" class="input mt-1"></div>
       <div><label class="text-sm">LWA Client Secret</label><input id="sp-cs" class="input mt-1" type="password"></div>
@@ -1006,6 +1044,8 @@ async function loadSettings() {
   document.getElementById('set-snap-days').value = r.data.snapshot_retention_days || 30;
   document.getElementById('set-anom-days').value = r.data.anomaly_retention_days || 180;
   document.getElementById('set-run-days').value = r.data.detection_run_retention_days || 14;
+  document.getElementById('set-pull-interval').value = r.data.plugin_pull_interval_minutes || 1440;
+  document.getElementById('biz-endpoint').textContent = state.apiBase || '[Worker URL]';
   // SP-API
   document.getElementById('sp-cid').value = r.data.sp_api_client_id || '';
   document.getElementById('sp-cs') .value = r.data.sp_api_client_secret || '';
@@ -1016,6 +1056,14 @@ async function loadSettings() {
   document.getElementById('sp-status').textContent = r.data.sp_api_last_run_at
     ? '上次拉取：' + r.data.sp_api_last_run_at
     : (r.data.sp_api_enabled === '1' ? '已启用，待首次拉取' : '未启用');
+}
+async function savePullInterval() {
+  const v = +document.getElementById('set-pull-interval').value || 1440;
+  if (v < 5) { toast('间隔太短（≥5）', 'error'); return; }
+  try {
+    await api('/api/settings', { method: 'PUT', body: JSON.stringify({ plugin_pull_interval_minutes: String(v) }) });
+    toast(`已保存：${v} 分钟（${(v/60).toFixed(1)} 小时）。下次插件 download 时自动同步。`, 'success');
+  } catch (e) { toast(e.message, 'error'); }
 }
 async function saveSpApi() {
   const body = {

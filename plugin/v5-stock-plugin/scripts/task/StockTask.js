@@ -11,14 +11,26 @@ const StockTask = {
     const profile = await session.get(DEFINE.PROFILE_KEY);
     if (!profile || !profile.accessible) { console.log('未授权 / token 失效，跳过'); return; }
 
-    // 1) 拉待执行命令
+    // 1) 拉待执行命令 + 同步服务端配置的拉取间隔
     let pendings = [];
     try {
       const text = await ShopClient.apost('/plugin/stock/inventory/download', {
         marketplaceId: profile.marketplaceId || DEFINE.MKID_US,
       });
       const json = text ? JSON.parse(text) : {};
-      pendings = (json && json.code === 0) ? (json.data || []) : [];
+      if (json && json.code === 0) {
+        pendings = json.data || [];
+        // 按服务端下发的拉取间隔重置 alarm（默认 1440 分钟 = 1 天）
+        const want = Number(json.pullIntervalMinutes) || 1440;
+        try {
+          const cur = await chrome.alarms.get('StockTask.run');
+          const curMin = cur ? Math.round(cur.periodInMinutes || 0) : null;
+          if (curMin !== want) {
+            chrome.alarms.create('StockTask.run', { periodInMinutes: want });
+            console.log(`[StockTask] 拉取间隔已同步：${curMin || 'n/a'} → ${want} 分钟`);
+          }
+        } catch (e) { console.log('alarm 同步失败：', e.message); }
+      }
     } catch (e) {
       console.log('download 失败：', e.message); return;
     }

@@ -210,39 +210,39 @@ async function seedDefaultRules(env) {
   if ((r?.n || 0) > 0) return;
   const defaults = [
     {
-      name: 'FBA可售库存：SP-API vs 紫鸟（跨源比对）',
-      description: 'SP-API 与紫鸟后台采集的 fba_available 不一致即告警',
+      name: 'FBA可售库存：业务系统 vs 紫鸟（跨源比对）',
+      description: '业务系统（IT 推送 source=system）与紫鸟后台采集的 fba_available 不一致即告警',
       rule_type: 'cross_source', metric: 'fba_available',
-      source_a: 'sp_api_inventory_summary', source_b: 'ziniao_seller_central',
+      source_a: 'system', source_b: 'ziniao_seller_central',
       tolerance_abs: 1, tolerance_pct: 5, severity: 'warning',
       rate_limit_seconds: 1800,
     },
     {
-      name: 'FBA预留库存：SP-API vs 紫鸟（跨源比对）',
+      name: 'FBA预留库存：业务系统 vs 紫鸟（跨源比对）',
       rule_type: 'cross_source', metric: 'fba_reserved',
-      source_a: 'sp_api_inventory_summary', source_b: 'ziniao_seller_central',
+      source_a: 'system', source_b: 'ziniao_seller_central',
       tolerance_abs: 1, tolerance_pct: 5, severity: 'info',
       rate_limit_seconds: 1800,
     },
     {
       name: '紫鸟数据停更',
-      description: '紫鸟插件超过 30 分钟未上报数据',
+      description: '紫鸟插件超过 36 小时未上报数据（默认每天拉一次，留 50% 容差）',
       rule_type: 'staleness', metric: 'fba_available',
       source_a: 'ziniao_seller_central',
-      staleness_minutes: 30, severity: 'warning',
-      rate_limit_seconds: 1800,
+      staleness_minutes: 36 * 60, severity: 'warning',
+      rate_limit_seconds: 3600,
     },
     {
-      name: 'SP-API 数据停更',
-      description: 'SP-API 拉取器超过 90 分钟未刷新',
+      name: '业务系统数据停更',
+      description: '业务系统超过 90 分钟未推送 source=system 的快照',
       rule_type: 'staleness', metric: 'fba_available',
-      source_a: 'sp_api_inventory_summary',
+      source_a: 'system',
       staleness_minutes: 90, severity: 'warning',
       rate_limit_seconds: 3600,
     },
     {
       name: '可售库存异常跳变',
-      description: '单次刷新 fba_available 跳变 ≥ 80% 视为异常',
+      description: '相邻两次紫鸟刷新 fba_available 跳变 ≥ 80% 视为异常',
       rule_type: 'sudden_jump', metric: 'fba_available',
       source_a: 'ziniao_seller_central',
       jump_pct: 80, severity: 'critical',
@@ -1190,7 +1190,9 @@ async function pluginStockDownload(env, request) {
     action: p.action,
     params: safeParse(p.params, {}),
   }));
-  return pluginOK({ data, lockId, totalResults: data.length });
+  // 下发"插件拉取间隔"，由后端动态控制；插件每次 download 后会按这个值重置 alarm
+  const pullIntervalMinutes = +(await getSetting(env, 'plugin_pull_interval_minutes', '1440')) || 1440;
+  return pluginOK({ data, lockId, totalResults: data.length, pullIntervalMinutes });
 }
 
 // POST /plugin/stock/inventory/upload  body: { taskId, status, items?, message? }
@@ -1579,6 +1581,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('snapshot_retention_days', '
 INSERT OR IGNORE INTO settings (key, value) VALUES ('anomaly_retention_days', '180');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('detection_run_retention_days', '14');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('api_token', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('plugin_pull_interval_minutes', '1440');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_enabled', '0');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_client_id', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('sp_api_client_secret', '');

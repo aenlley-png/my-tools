@@ -25,9 +25,10 @@ function startTask() {
   TaskManager.inject('AuthTask.run', AuthTask, 5 * 60, () => updateIcon());
   // 2 分钟刷 merchantId / 登录状态
   TaskManager.inject('ProfileTask.run', ProfileTask, 2 * 60, () => updateIcon());
-  // 10 分钟拉一次指令并执行（也可由 popup 立即触发）
+  // 默认每天拉一次指令（86400 秒）；StockTask 每次执行后会按服务端
+  // settings.plugin_pull_interval_minutes 自动调整 alarm，所以这里只是初始值
   if (DEFINE.RUNTIME === 'PROD') {
-    TaskManager.inject('StockTask.run', StockTask, 10 * 60, () => {});
+    TaskManager.inject('StockTask.run', StockTask, 24 * 60 * 60, () => {});
   }
 }
 
